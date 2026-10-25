@@ -230,7 +230,10 @@ class Job:
             density=1.0, viscosity=case.nu, energy=case.energy, conductivity=case.kappa, cp=1.0,
             buoyancy=list(case.buoyancy) + [0.0], t_ref=case.t_ref, max_iter=int(self.spec.get("max_iter", 5000)),
             tol=float(self.spec.get("tol", 1e-5)), backend=self.spec.get("backend", "auto"),
-            init_T=case.init_T,
+            init_T=case.init_T, turbulence=self.spec.get("turbulence", "laminar"),
+            turb_intensity=float(self.spec.get("turb_intensity", 0.05)),
+            turb_viscosity_ratio=float(self.spec.get("turb_viscosity_ratio", 10.0)),
+            ref_velocity=max(case.u_ref, 1e-12),
         )
         self.mesh = mesh
         self._run_unstructured(mesh=mesh, ucase=ucase)
@@ -337,7 +340,7 @@ class Job:
         lo, hi = _display_range(field, vals)
         return {"type": "frame", "mesh": "unstructured", "field": field, "fields": names,
                 "data": _b64(vals), "min": lo, "max": hi,
-                "step": solver.iteration, "t": solver.iteration, "cells": solver.nc}
+                "step": solver.iteration, "t": solver.t, "cells": solver.nc}
 
     # ---------------- unstructured (Fluent mesh) ----------------
     def _run_unstructured(self, mesh=None, ucase=None):
@@ -345,17 +348,31 @@ class Job:
         from ..unstructured.case import UnstructuredCase, default_boundaries
         from ..unstructured.simple import SimpleSolver
 
+        info = {}
+        if mesh is None and self.spec.get("preset"):
+            from ..unstructured.presets import make_unstructured_preset
+
+            mesh, ucase, info = make_unstructured_preset(self.spec["preset"], **(self.spec.get("params") or {}))
+            for k, v in (self.spec.get("overrides") or {}).items():
+                if not hasattr(ucase, k):
+                    raise ValueError(f"unknown case field {k!r}")
+                setattr(ucase, k, v)
         if mesh is None:
             mesh = self.meshes.get(self.spec.get("mesh_id"))
             if mesh is None:
                 raise ValueError("no mesh uploaded (mesh_id not found)")
         self.mesh = mesh
+        self.info = info
         if ucase is None:
+            from ..unstructured.case import default_periodic_pairs
+
             cd = dict(self.spec.get("case") or {})
             bnd = default_boundaries(mesh)
             for k, v in (cd.pop("boundaries", None) or {}).items():
                 bnd[k] = v
             ucase = UnstructuredCase(boundaries=bnd, **cd)
+            if not ucase.periodic:
+                ucase.periodic = default_periodic_pairs(mesh, ucase.boundaries)
         self.case = ucase
         self.set_status("planning", name=ucase.name)
         be = get_backend(ucase.backend)
@@ -370,6 +387,10 @@ class Job:
             else:
                 raise MemoryError(" ".join(est.advice))
         solver = SimpleSolver(mesh, ucase, backend=be)
+        if info:
+            from ..unstructured.presets import apply_initial_condition
+
+            apply_initial_condition(solver, info)
         self.solver = solver
         desc = solver.describe()
         plan = {
@@ -386,19 +407,53 @@ class Job:
                 {"stage": "AMG hierarchy setup", "device": "CPU", "method": "smoothed aggregation, rebuilt every 10 its",
                  "reason": "irregular graph work stays on the host"},
             ],
-            "notes": [f"{ucase.algorithm}, {ucase.scheme}, relax u={ucase.relax_u} p={ucase.relax_p}"],
+            "notes": [f"{ucase.algorithm}, {ucase.scheme}, relax u={ucase.relax_u} p={ucase.relax_p}",
+                      f"viscous model: {ucase.turbulence}; radiation: {ucase.radiation}; "
+                      + (f"transient {ucase.time_scheme} dt={ucase.dt}" if ucase.unsteady else "steady")],
         }
+        if ucase.turbulent:
+            plan["placements"].append({"stage": "k-omega SST + wall treatment", "device": be.device.upper(),
+                                       "method": "segregated k, omega; Spalding wall shear; KD-tree wall distance",
+                                       "reason": "y+-insensitive near-wall treatment, as Fluent's SST"})
+        if ucase.radiation == "p1":
+            plan["placements"].append({"stage": "P-1 radiation", "device": be.device.upper(),
+                                       "method": "incident-radiation equation, Marshak walls",
+                                       "reason": "one elliptic solve per iteration, coupled to energy"})
         self.plan = plan
         self.hub.publish({"type": "plan", "plan": plan, "describe": desc})
         if mesh.dim == 2:
             self.hub.publish(self.mesh_geometry_event(mesh))
-        self._loop(solver, label="SIMPLE")
+        self._loop(solver, label="transient" if ucase.unsteady else "SIMPLE")
         res = {"iterations": solver.iteration, "converged": solver.converged, "describe": desc,
-               "timers": dict(solver.timers), "mass_balance": solver.mass_balance()}
+               "timers": dict(solver.timers), "mass_balance": solver.mass_balance(),
+               "wall_report": solver.wall_report(), "periodic_mass_flow": solver.periodic_mass_flow()}
+        if ucase.unsteady:
+            res["time"] = solver.time
+        try:
+            from ..validation.checks import validate_unstructured
+
+            res["validation"] = validate_unstructured(solver, info)
+            for ch in res["validation"]["checks"]:
+                mark = "PASS" if ch.get("pass") else "CHECK"
+                ref = f" (ref {ch['reference']:.4g})" if ch.get("reference") is not None else ""
+                self.log(f"[validation] {mark} {ch['name']}: {ch['value']:.4g} {ch.get('unit', '')}{ref}")
+        except Exception as exc:
+            self.log(f"validation skipped: {exc}", "warn")
         self.result = res
         mb = res["mass_balance"]
         net = sum(mb.values())
         self.log(f"Mass balance: net {net:.3e} ({', '.join(f'{k} {v:.4g}' for k, v in mb.items())})")
+        for z, rep in res["wall_report"].items():
+            extra = ""
+            if "heat_flow_conv" in rep:
+                extra += f", Q_conv {rep['heat_flow_conv']:.4g}"
+            if "heat_flow_rad" in rep:
+                extra += f", Q_rad {rep['heat_flow_rad']:.4g}"
+            self.log(f"[report] wall {z}: F=({', '.join(f'{v:.4g}' for v in rep['force_total'])}) "
+                     f"Cd={rep['cd']:.4g} Cl={rep['cl']:.4g} y+ avg {rep['yplus_avg']:.3g} max {rep['yplus_max']:.3g}"
+                     f" Cf avg {rep['cf_avg']:.4g}{extra}")
+        for k, v in res["periodic_mass_flow"].items():
+            self.log(f"[report] periodic mass flow {k}: {v:.6g}")
         if mesh.dim == 2:
             self.hub.publish(self.unstructured_frame(solver, self.view_field))
         status = "stopped" if self._stop.is_set() else ("converged" if solver.converged else "finished")
@@ -433,21 +488,26 @@ class Job:
             bnd = structured_boundary_specs(s.case)
             energy = s.energy
             nu = s.case.nu
+            turbulence, radiation, unsteady, dt = "laminar", "off", False, 0.01
         else:
             mesh = s.mesh
             pts = s.cell_centres()
             f = s.fields()
-            fields = {k: v for k, v in f.items() if k in ("x-velocity", "y-velocity", "z-velocity", "pressure", "temperature")}
+            fields = {k: v for k, v in f.items() if k in ("x-velocity", "y-velocity", "z-velocity", "pressure",
+                                                           "temperature", "turb-kinetic-energy", "specific-diss-rate")}
             bnd = {k: _jsonable(v.__dict__) for k, v in s.zone_specs.items()}
             energy = s.energy
             nu = s.case.viscosity / s.case.density
+            turbulence, radiation = s.case.turbulence, s.case.radiation
+            unsteady, dt = s.case.unsteady, s.case.dt
         files["msh"] = os.path.join(outdir, base + ".msh")
         write_fluent_mesh(mesh, files["msh"])
         files["ip"] = write_interpolation_file(os.path.join(outdir, base + ".ip"), pts, fields)
         files["jou"] = write_journal(os.path.join(outdir, "run_fluent.jou"), base + ".msh", base + ".ip",
-                                     energy=energy)
+                                     energy=energy, viscous=turbulence, radiation=radiation, unsteady=unsteady, dt=dt)
         files["py"] = write_pyfluent_script(os.path.join(outdir, "run_pyfluent.py"), base + ".msh", base + ".ip",
-                                            dim=mesh.dim, energy=energy, boundaries=bnd, viscosity=nu)
+                                            dim=mesh.dim, energy=energy, boundaries=bnd, viscosity=nu,
+                                            turbulence=turbulence, radiation=radiation)
         csv = os.path.join(outdir, base + "_cells.csv")
         cols = ["x", "y", "z"][:pts.shape[1]] + list(fields)
         np.savetxt(csv, np.column_stack([pts] + [fields[k] for k in fields]), delimiter=",",

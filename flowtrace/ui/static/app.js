@@ -78,8 +78,19 @@ function setSource(src) {
   $$("#sourceSeg button").forEach((x) => x.classList.toggle("active", x.dataset.src === src));
   $("#structuredCase").classList.toggle("hidden", src !== "structured");
   $("#unstructuredCase").classList.toggle("hidden", src !== "unstructured");
-  $("#structSolverCard").classList.toggle("hidden", src !== "structured");
-  $("#unstructSolverCard").classList.toggle("hidden", src !== "unstructured" && $("#mode").value !== "steady-simplec");
+  updateSolverCards();
+}
+function presetKind() {
+  const p = S.presets.find((x) => x.id === $("#presetSelect").value);
+  return p ? p.kind : "structured";
+}
+function updateSolverCards() {
+  const src = S.source, uPreset = src === "structured" && presetKind() === "unstructured";
+  const pressureBased = src === "unstructured" || uPreset || $("#mode").value === "steady-simplec";
+  $("#structSolverCard").classList.toggle("hidden", src !== "structured" || uPreset);
+  $("#gridCard").classList.toggle("hidden", uPreset);
+  $("#unstructSolverCard").classList.toggle("hidden", !pressureBased);
+  $("#modelsCard").classList.toggle("hidden", !pressureBased || uPreset);
 }
 
 function renderPresetParams() {
@@ -89,7 +100,9 @@ function renderPresetParams() {
   const box = $("#presetParams");
   box.innerHTML = "";
   const labels = { re: "Reynolds number", ra: "Rayleigh number", pr: "Prandtl number", n: "Cells per side", nx: "Cells in x", ny: "Cells in y",
-    n_per_d: "Cells per diameter", n_per_h: "Cells per step height", length: "Channel length", aspect: "Aspect ratio" };
+    n_per_d: "Cells per diameter", n_per_h: "Cells per step height", length: "Channel length", aspect: "Aspect ratio",
+    re_tau: "Friction Reynolds number Re_τ", yplus1: "First-cell y+", re_l: "Reynolds number per unit length",
+    tau: "Optical thickness τ", t_hot: "Hot wall T (K)", t_cold: "Cold wall T (K)", dt: "Time step", t_end: "End time" };
   for (const [k, v] of Object.entries(p.params)) {
     const l = document.createElement("label");
     l.className = "field";
@@ -97,12 +110,19 @@ function renderPresetParams() {
     box.appendChild(l);
   }
   const d = p.defaults;
-  $("#tEnd").value = d.t_end ?? "";
-  $("#maxSteps").value = d.max_steps;
-  $("#steadyTol").value = d.steady_tol ?? "";
-  $("#scheme").value = d.scheme;
-  $("#cfl").value = d.cfl;
+  if (p.kind === "unstructured") {
+    $("#maxIter").value = d.max_iter; $("#uTol").value = d.tol;
+    $("#algorithm").value = d.algorithm; $("#uScheme").value = d.scheme;
+    $("#relaxU").value = d.relax_u; $("#relaxP").value = d.relax_p;
+  } else {
+    $("#tEnd").value = d.t_end ?? "";
+    $("#maxSteps").value = d.max_steps;
+    $("#steadyTol").value = d.steady_tol ?? "";
+    $("#scheme").value = d.scheme;
+    $("#cfl").value = d.cfl;
+  }
   $("#caseTitle").textContent = p.title;
+  updateSolverCards();
 }
 
 async function loadSystem() {
@@ -152,9 +172,13 @@ function renderBench(b) {
 }
 
 async function loadPresets() {
-  const { presets } = await api("/api/presets");
-  S.presets = presets;
-  $("#presetSelect").innerHTML = presets.map((p) => `<option value="${p.id}">${esc(p.title)}</option>`).join("");
+  const r = await api("/api/presets");
+  const sp = r.presets.map((p) => ({ ...p, kind: "structured" }));
+  const up = (r.unstructured_presets || []).map((p) => ({ ...p, kind: "unstructured" }));
+  S.presets = sp.concat(up);
+  const opt = (p) => `<option value="${p.id}">${esc(p.title)}</option>`;
+  $("#presetSelect").innerHTML = `<optgroup label="Structured (MAC, GPU-ready)">${sp.map(opt).join("")}</optgroup>` +
+    (up.length ? `<optgroup label="Fluent-style (SIMPLEC, unstructured)">${up.map(opt).join("")}</optgroup>` : "");
   $("#presetSelect").addEventListener("change", renderPresetParams);
   renderPresetParams();
 }
@@ -190,7 +214,7 @@ async function uploadMesh(file) {
 }
 function renderZoneTable(info) {
   const t = $("#zoneTable");
-  const kinds = ["wall", "inlet", "outlet", "pressure", "symmetry"];
+  const kinds = ["wall", "inlet", "outlet", "pressure", "symmetry", "periodic"];
   const dim = info.dim;
   t.innerHTML = info.zones.filter((z) => z.kind === "face" && z.type !== "interior").map((z) => {
     const b = info.boundaries[z.name] || { kind: "wall" };
@@ -199,7 +223,7 @@ function renderZoneTable(info) {
       <div class="row" style="margin-top:4px">
         <select data-k="kind" style="width:96px">${kinds.map((k) => `<option ${k === b.kind ? "selected" : ""}>${k}</option>`).join("")}</select>
         <input type="text" data-k="val" title="inlet: normal speed or u,v${dim === 3 ? ",w" : ""}; wall: wall velocity u,v${dim === 3 ? ",w" : ""}; outlet: gauge pressure" placeholder="speed / u,v / p" value="${b.kind === "inlet" ? (b.normal_speed ?? 1) : ""}">
-        <input type="text" data-k="therm" title="T=value (fixed temperature) or q=value (heat flux into the domain)" placeholder="T=… / q=…" value="">
+        <input type="text" data-k="therm" title="T=value (fixed temperature) or q=value (heat flux into the domain); add e=0.8 for the radiation emissivity" placeholder="T=… / q=… e=…" value="">
       </div></td></tr>`;
   }).join("");
 }
@@ -217,9 +241,11 @@ function zoneSpecs() {
       else if (kind === "outlet" || kind === "pressure") spec.pressure = nums[0] || 0;
     }
     if (th) {
-      const m = th.match(/^([TtQq])\s*=\s*([-+0-9.eE]+)/);
+      const m = th.match(/(?:^|\s)([TtQq])\s*=\s*([-+0-9.eE]+)/);
       if (m) { spec.thermal = m[1].toLowerCase() === "t" ? "temperature" : "flux"; spec.value = +m[2]; }
       else if (!Number.isNaN(+th)) { spec.thermal = "temperature"; spec.value = +th; }
+      const e = th.match(/(?:^|\s)e\s*=\s*([0-9.]+)/);
+      if (e) spec.emissivity = +e[1];
     }
     out[tr.dataset.zone] = spec;
   });
@@ -227,16 +253,38 @@ function zoneSpecs() {
 }
 
 /* ------------------------------------------------------------------ run */
+function modelSettings() {
+  const vec = (txt) => txt.trim() ? txt.split(/[ ,;]+/).map(Number).filter((x) => !Number.isNaN(x)) : [0, 0, 0];
+  return {
+    turbulence: $("#turbModel").value, turb_intensity: +$("#turbI").value, turb_viscosity_ratio: +$("#turbR").value,
+    turb_scheme: $("#turbScheme").value, radiation: $("#radModel").value, absorption: +$("#radA").value,
+    periodic_pressure_gradient: vec($("#perG").value), unsteady: $("#unsteady").checked, dt: +$("#uDt").value,
+    t_end: +$("#uTend").value, inner_iterations: +$("#uInner").value, time_scheme: $("#uTimeScheme").value,
+  };
+}
+function readParams() {
+  const params = {};
+  $$("#presetParams input").forEach((i) => { params[i.dataset.param] = Number.isInteger(+i.value) && !i.value.includes(".") && !/e/i.test(i.value) ? parseInt(i.value, 10) : +i.value; });
+  return params;
+}
 function buildSpec() {
   const backend = $("#backend").value, precision = $("#precision").value;
-  if (S.source === "structured") {
-    const params = {};
-    $$("#presetParams input").forEach((i) => { params[i.dataset.param] = Number.isInteger(+i.value) && !i.value.includes(".") && !/e/i.test(i.value) ? parseInt(i.value, 10) : +i.value; });
-    const tEnd = $("#tEnd").value.trim(), tol = $("#steadyTol").value.trim();
+  if (S.source === "structured" && presetKind() === "unstructured") {
     return {
-      kind: "structured", preset: $("#presetSelect").value, params, mode: $("#mode").value, fmg: $("#fmg").checked,
+      kind: "unstructured", preset: $("#presetSelect").value, params: readParams(), checkpoint_seconds: +$("#ckpt").value || 0,
+      field: $("#fieldSelect").value || null,
+      overrides: { backend, max_iter: +$("#maxIter").value, tol: +$("#uTol").value, algorithm: $("#algorithm").value,
+        scheme: $("#uScheme").value, relax_u: +$("#relaxU").value, relax_p: +$("#relaxP").value },
+    };
+  }
+  if (S.source === "structured") {
+    const tEnd = $("#tEnd").value.trim(), tol = $("#steadyTol").value.trim();
+    const m = modelSettings();
+    return {
+      kind: "structured", preset: $("#presetSelect").value, params: readParams(), mode: $("#mode").value, fmg: $("#fmg").checked,
       checkpoint_seconds: +$("#ckpt").value || 0, field: $("#fieldSelect").value || null,
       max_iter: +$("#maxIter").value, tol: +$("#uTol").value,
+      turbulence: m.turbulence, turb_intensity: m.turb_intensity, turb_viscosity_ratio: m.turb_viscosity_ratio,
       overrides: { backend, precision, scheme: $("#scheme").value, cfl: +$("#cfl").value, poisson: $("#poisson").value,
         max_steps: +$("#maxSteps").value, t_end: tEnd === "" ? null : +tEnd, steady_tol: tol === "" ? null : +tol },
     };
@@ -246,9 +294,10 @@ function buildSpec() {
     kind: "unstructured", mesh_id: S.meshId, checkpoint_seconds: +$("#ckpt").value || 0,
     case: {
       name: S.meshInfo.name, boundaries: zoneSpecs(), density: +$("#uDensity").value, viscosity: +$("#uViscosity").value,
-      energy: $("#uEnergy").checked, conductivity: +$("#uConductivity").value, cp: +$("#uCp").value,
+      energy: $("#uEnergy").checked || $("#radModel").value !== "off", conductivity: +$("#uConductivity").value, cp: +$("#uCp").value,
       algorithm: $("#algorithm").value, scheme: $("#uScheme").value, relax_u: +$("#relaxU").value, relax_p: +$("#relaxP").value,
       max_iter: +$("#maxIter").value, tol: +$("#uTol").value, backend, precision: precision === "fp32" ? "fp32" : "fp64",
+      ...modelSettings(),
     },
   };
 }
@@ -344,12 +393,24 @@ function onFrame(ev) {
 function onResult(res) {
   const v = res.validation;
   if (v && v.checks) {
-    $("#validation").innerHTML = v.checks.map((c) => `<div class="check"><span class="badge ${c.pass ? "pass" : "check"}">${c.pass ? "PASS" : "CHECK"}</span><span>${esc(c.name)}${c.reference !== undefined && c.reference !== null ? ` <span class="muted">(ref ${c.reference})</span>` : ""}</span><span class="val">${fmt(c.value, 4)} <span class="muted">${esc(c.unit || "")}</span></span></div>`).join("");
-  } else if (res.mass_balance) {
+    $("#validation").innerHTML = v.checks.map((c) => `<div class="check"><span class="badge ${c.pass ? "pass" : "check"}">${c.pass ? "PASS" : "CHECK"}</span><span>${esc(c.name)}${c.reference !== undefined && c.reference !== null ? ` <span class="muted">(ref ${fmt(c.reference, 4)})</span>` : ""}</span><span class="val">${fmt(c.value, 4)} <span class="muted">${esc(c.unit || "")}</span></span></div>`).join("");
+  }
+  if (!(v && v.checks) && res.mass_balance) {
     const mb = res.mass_balance; const net = Object.values(mb).reduce((a, b) => a + b, 0);
     $("#validation").innerHTML = `<div class="check"><span class="badge ${Math.abs(net) < 1e-6 * Math.max(1e-30, ...Object.values(mb).map(Math.abs)) + 1e-9 ? "pass" : "check"}">MASS</span><span>Net boundary mass flow</span><span class="val">${net.toExponential(2)}</span></div>` +
       Object.entries(mb).map(([k, v]) => `<div class="check"><span class="muted">${esc(k)}</span><span class="val">${fmt(v, 5)}</span></div>`).join("") +
       `<div class="check"><span class="badge ${res.converged ? "pass" : "check"}">${res.converged ? "CONV" : "ITER"}</span><span>${res.iterations} iterations</span></div>`;
+  }
+  const wr = res.wall_report;
+  if (wr && Object.keys(wr).length) {
+    const rows = Object.entries(wr).map(([z, r]) => `<tr><td>${esc(z)}</td><td class="num">${fmt(r.force_total[0], 4)}</td><td class="num">${fmt(r.force_total[1], 4)}</td>` +
+      `<td class="num">${fmt(r.cd, 4)}</td><td class="num">${fmt(r.cf_avg, 4)}</td><td class="num">${fmt(r.yplus_avg, 3)} / ${fmt(r.yplus_max, 3)}</td>` +
+      `<td class="num">${r.heat_flow_conv !== undefined ? fmt(r.heat_flow_conv, 4) : "–"}${r.heat_flow_rad !== undefined ? " + " + fmt(r.heat_flow_rad, 4) + " rad" : ""}</td></tr>`).join("");
+    $("#validation").insertAdjacentHTML("beforeend", `<div style="margin-top:8px"><b>Wall report</b></div><table class="grid"><tr><th>Wall</th><th>Fx</th><th>Fy</th><th>Cd</th><th>Cf avg</th><th>y+ avg/max</th><th>Q</th></tr>${rows}</table>`);
+  }
+  const pm = res.periodic_mass_flow;
+  if (pm && Object.keys(pm).length) {
+    $("#validation").insertAdjacentHTML("beforeend", Object.entries(pm).map(([k, v]) => `<div class="check"><span class="muted">periodic ${esc(k)}</span><span class="val">${fmt(v, 6)}</span></div>`).join(""));
   }
   if (res.timers) drawTimers(res.timers);
 }
@@ -595,6 +656,7 @@ function init() {
   $("#runBtn").addEventListener("click", run);
   $("#stopBtn").addEventListener("click", () => post("/api/stop"));
   $("#mode").addEventListener("change", () => setSource(S.source));
+  $("#presetSelect").addEventListener("change", updateSolverCards);
   $("#fieldSelect").addEventListener("change", (e) => post("/api/view", { field: e.target.value }));
   ["#cmapSelect", "#showStream", "#showVectors", "#showEdges", "#smooth"].forEach((s) => $(s).addEventListener("change", draw));
   $("#benchBtn").addEventListener("click", async () => {

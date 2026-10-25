@@ -85,3 +85,71 @@ def validate_structured(solver, probe_log=None) -> dict:
     checks.append({"name": "Discrete continuity max|div u|", "value": div, "unit": "1/s",
                    "pass": div < (1e-8 if solver.dtype == np.float64 else 1e-3)})
     return {"checks": checks}
+
+
+def validate_unstructured(solver, info=None) -> dict:
+    """Checks for a finished unstructured (SIMPLE/SIMPLEC) run."""
+    info = info or {}
+    checks = []
+    kind = info.get("kind")
+    c = solver.case
+    if kind == "channel":
+        xc = solver.cell_centres()
+        f = solver.fields()
+        sel = xc[:, 0] < xc[:, 0].min() + 1e-9 + (xc[:, 0].max() - xc[:, 0].min()) / 2
+        y, u = xc[sel, 1], f["x-velocity"][sel]
+        o = np.argsort(y)
+        y, u = y[o], u[o]
+        yy = np.concatenate([[0.0], y, [2.0]])
+        uu = np.concatenate([[0.0], u, [0.0]])
+        ub = float(np.sum(0.5 * (uu[1:] + uu[:-1]) * np.diff(yy)) / 2.0)
+        ref = info["ub_plus_ref"]
+        checks.append({"name": f"Bulk velocity U_b+ vs DNS (Re_tau={info['re_tau']:g})", "value": ub,
+                       "reference": ref, "unit": "U_b/u_tau", "pass": abs(ub - ref) / ref < 0.03})
+        yp = y[y < 1.0] * info["re_tau"]
+        up = u[y < 1.0]
+        u100 = float(np.interp(100.0, yp, up))
+        ref100 = np.log(100.0) / 0.41 + 5.2
+        checks.append({"name": "Log law at y+ = 100", "value": u100, "reference": ref100, "unit": "u+",
+                       "pass": abs(u100 - ref100) / ref100 < 0.06})
+        rep = solver.wall_report()
+        fx = sum(r["force_total"][0] for r in rep.values())
+        vol = float(solver.fv.geometry.total_volume)
+        drive = abs(c.periodic_pressure_gradient[0]) * vol
+        checks.append({"name": "Wall shear balances the driving pressure gradient", "value": fx / drive,
+                       "reference": 1.0, "unit": "F_wall / (dp/dx V)", "pass": abs(fx / drive - 1.0) < 0.01})
+    elif kind == "flat_plate":
+        prof = solver.wall_profile("plate")
+        x = 0.97
+        cf = float(np.interp(x, prof["x"], prof["cf"]))
+        ref = 0.00271  # NASA TMR 2DZP, SST, finest grid, x = 0.97
+        checks.append({"name": "Skin friction at x = 0.97 vs NASA TMR SST", "value": cf, "reference": ref,
+                       "unit": "Cf", "pass": abs(cf - ref) / ref < 0.08})
+        x2 = 1.5
+        cf2 = float(np.interp(x2, prof["x"], prof["cf"]))
+        sch = 0.0592 * (x2 * info["re_l"]) ** -0.2
+        checks.append({"name": "Skin friction at x = 1.5 vs Schlichting 0.0592 Re_x^-1/5", "value": cf2,
+                       "reference": float(sch), "unit": "Cf", "pass": abs(cf2 - sch) / sch < 0.08})
+        checks.append({"name": "Max wall y+ on the plate", "value": float(prof["yplus"].max()), "reference": 1.0,
+                       "unit": "y+", "pass": True})
+    elif kind == "radiation_slab":
+        rep = solver.wall_report()
+        q = rep["hot"]["heat_flow_rad"] / info["height"]
+        checks.append({"name": "P-1 radiative flux vs exact slab solution", "value": q, "reference": info["q_exact"],
+                       "unit": "W/m^2", "pass": abs(q - info["q_exact"]) / info["q_exact"] < 0.01})
+        bal = (rep["hot"]["heat_flow_rad"] + rep["cold"]["heat_flow_rad"]) / rep["hot"]["heat_flow_rad"]
+        checks.append({"name": "Radiative energy balance (hot + cold)", "value": bal, "reference": 0.0,
+                       "unit": "relative", "pass": abs(bal) < 1e-4})
+    elif kind == "taylor_green":
+        xc = solver.cell_centres()
+        ue = np.sin(xc[:, 0]) * np.cos(xc[:, 1]) * np.exp(-2 * info["nu"] * solver.time)
+        err = float(np.abs(solver.fields()["x-velocity"] - ue).max())
+        checks.append({"name": "Transient Taylor-Green error vs exact (periodic mesh)", "value": err,
+                       "reference": 0.0, "unit": "|u - u_exact|", "pass": err < 0.02})
+    mb = solver.mass_balance()
+    if mb:
+        scale = max(max(abs(v) for v in mb.values()), 1e-30)
+        net = abs(sum(mb.values()))
+        checks.append({"name": "Global mass balance", "value": net / scale if scale > 1e-20 else net,
+                       "unit": "relative", "pass": net <= 1e-6 * scale + 1e-12})
+    return {"checks": checks}

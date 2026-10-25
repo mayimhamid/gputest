@@ -26,7 +26,8 @@ def test_server_end_to_end(tmp_path):
         assert st == 200 and b"FlowTrace" in body
         sysinfo = json.loads(_get(url + "api/system")[1])
         assert "numpy" in sysinfo["backends"]
-        presets = json.loads(_get(url + "api/presets")[1])["presets"]
+        presets_all = json.loads(_get(url + "api/presets")[1])
+        presets = presets_all["presets"]
         assert {p["id"] for p in presets} >= {"cavity", "natural_convection", "cylinder"}
         est = _post(url + "api/estimate", {"kind": "structured", "preset": "cavity", "params": {"n": 64}})
         assert est["cells"] == 4096
@@ -44,5 +45,17 @@ def test_server_end_to_end(tmp_path):
         assert st == 200 and data[:2] == b"PK"
         st, data = _get(url + "api/export/ip")
         assert data.splitlines()[0] == b"3"
+        assert {p["id"] for p in presets_all["unstructured_presets"]} >= {"turbulent_channel", "flat_plate"}
+        r = _post(url + "api/run", {"kind": "unstructured", "preset": "radiation_slab", "params": {"nx": 20}})
+        assert r["ok"]
+        for _ in range(240):
+            state = json.loads(_get(url + "api/state")[1])
+            if state["job"]["status"] in ("converged", "finished", "error", "stopped"):
+                break
+            time.sleep(0.25)
+        assert state["job"]["status"] == "converged", state["job"]
+        checks = state["job"]["result"]["validation"]["checks"]
+        assert all(c["pass"] for c in checks), checks
+        assert "hot" in state["job"]["result"]["wall_report"]
     finally:
         httpd.shutdown()

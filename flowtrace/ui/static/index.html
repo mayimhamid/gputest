@@ -39,7 +39,7 @@
             <div class="desc" id="presetDesc"></div>
             <div id="presetParams"></div>
           </div>
-          <div class="card">
+          <div class="card" id="gridCard">
             <h3>Grid & run control</h3>
             <label class="field">End time (blank = steady)<input type="number" id="tEnd" step="any" placeholder="steady"></label>
             <label class="field">Max steps<input type="number" id="maxSteps"></label>
@@ -95,6 +95,21 @@
             <label class="field">Relaxation: pressure<input type="number" id="relaxP" value="1.0" step="0.05"></label>
             <label class="field">Max iterations<input type="number" id="maxIter" value="3000"></label>
             <label class="field">Residual target<input type="number" id="uTol" value="1e-5" step="any"></label>
+          </div>
+          <div class="card" id="modelsCard">
+            <h3>Models</h3>
+            <label class="field">Viscous model<select id="turbModel"><option value="laminar">Laminar</option><option value="k-omega-sst">k-ω SST</option></select></label>
+            <label class="field">Turbulence intensity<input type="number" id="turbI" value="0.05" step="any"></label>
+            <label class="field">Turbulent viscosity ratio<input type="number" id="turbR" value="10" step="any"></label>
+            <label class="field">k/ω discretisation<select id="turbScheme"><option value="upwind">First-order upwind</option><option value="second-order">Second-order upwind</option></select></label>
+            <label class="field">Radiation<select id="radModel"><option value="off">Off</option><option value="p1">P-1</option></select></label>
+            <label class="field">Absorption coeff. (1/m)<input type="number" id="radA" value="1" step="any"></label>
+            <label class="field">Periodic dp/dx (x,y,z)<input type="text" id="perG" placeholder="-1,0,0"></label>
+            <label class="field">Transient<input type="checkbox" id="unsteady"></label>
+            <label class="field">Time step Δt<input type="number" id="uDt" value="0.01" step="any"></label>
+            <label class="field">End time<input type="number" id="uTend" value="1" step="any"></label>
+            <label class="field">Iterations / time step<input type="number" id="uInner" value="20"></label>
+            <label class="field">Time scheme<select id="uTimeScheme"><option value="bdf2">2nd order (BDF2)</option><option value="euler">1st order (Euler)</option></select></label>
           </div>
           <div class="card">
             <h3>Execution</h3>

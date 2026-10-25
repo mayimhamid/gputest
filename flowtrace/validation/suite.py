@@ -64,6 +64,19 @@ def run_suite(quick: bool = True, backend: str = "auto", verbose: bool = True) -
     err = compare_ghia(100, y, u, y, vv)
     record("SIMPLEC skewed triangles, cavity Re=100 vs Ghia", err["u_max_err"], "Ghia", err["u_max_err"] < 0.03,
            time.perf_counter() - t0)
+    from ..unstructured.presets import radiation_slab, turbulent_channel
+    from .checks import validate_unstructured
+
+    for label, make in (("SST turbulent channel Re_tau=395", lambda: turbulent_channel(ny=64)),
+                        ("P-1 radiating slab tau=1", lambda: radiation_slab(tau=1.0))):
+        t0 = time.perf_counter()
+        mesh, case, info = make()
+        s = _run(SimpleSolver(mesh, case, backend=be))
+        for ch in validate_unstructured(s, info)["checks"]:
+            record(f"{label}: {ch['name']}"[:52], ch["value"], round(ch["reference"], 4)
+                   if isinstance(ch.get("reference"), float) else ch.get("reference", "-"), bool(ch["pass"]),
+                   time.perf_counter() - t0)
+            t0 = time.perf_counter()
     ok = all(r[3] for r in rows)
     if verbose:
         print("\nAll checks passed." if ok else "\nSome checks failed.")
