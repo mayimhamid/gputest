@@ -1,0 +1,40 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "flowtrace"
+version = "0.1.0"
+description = "FlowTrace: heterogeneous, hardware-aware CFD solver with Ansys Fluent interoperability"
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "MIT" }
+dependencies = [
+    "numpy>=1.22",
+    "scipy>=1.8",
+]
+
+[project.optional-dependencies]
+# CPU JIT kernels (multi-core stencils)
+cpu = ["numba>=0.57", "psutil>=5.9"]
+# NVIDIA GPU backend. Pick the wheel that matches your CUDA driver:
+#   pip install cupy-cuda12x   (CUDA 12)   or   pip install cupy-cuda11x
+gpu = ["cupy-cuda12x>=12", "nvidia-ml-py>=11"]
+# Algebraic multigrid for unstructured pressure equations
+amg = ["pyamg>=4.2"]
+# Live link to a licensed Ansys Fluent installation
+fluent = ["ansys-fluent-core>=0.20"]
+dev = ["pytest>=7"]
+all = ["numba>=0.57", "psutil>=5.9", "pyamg>=4.2"]
+
+[project.scripts]
+flowtrace = "flowtrace.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["flowtrace*"]
+
+[tool.setuptools.package-data]
+"flowtrace.ui" = ["static/*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
