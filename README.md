@@ -105,13 +105,28 @@ pressure-based algorithm Fluent uses.
 | Lid-driven cavity Re=100, 64², MAC | max \|Δu\| = 0.004, max \|Δv\| = 0.0085 | Ghia et al. 1982 |
 | Lid-driven cavity Re=100, 48², SIMPLEC on Fluent-format quads | max \|Δu\| = 0.0044 | Ghia et al. 1982 |
 | Same, skewed triangles (60° non-orthogonality) | max \|Δu\| = 0.0067 | Ghia et al. 1982 |
+| Lid-driven cavity **Re=1000**, 128², SIMPLEC | max \|Δu\| = 0.005, max \|Δv\| = 0.010 (3 546 iterations, 354 s on 4 CPU cores) | Ghia et al. 1982 |
+| Natural convection Ra=1e3 via SIMPLEC + Boussinesq | Nu ≈ 1.120 | 1.118 |
 | Natural convection Ra=1e4, 64² | Nu = 2.251, u_max = 16.19, v_max = 19.64 | 2.243, 16.18, 19.62 (de Vahl Davis 1983) |
 | Natural convection Ra=1e5, 64² (FMG) | Nu = 4.569 | 4.519 |
 | Channel Re=50 | outlet profile within 0.006 of Poiseuille, dp/dx = 0.238 (0.24) | analytic |
 | Projection | max \|div u\| ≈ 1e-14 (fast solver), 1e-11 (multigrid) | 0 |
 | SIMPLEC channel / exported step mesh | net mass imbalance ≈ 1e-12 | 0 |
 
-Run `python -m pytest` (≈70 tests) or `python -m flowtrace validate`.
+Run `python -m pytest` (75 tests) or `python -m flowtrace validate`.
+
+**Steady vs transient:** for steady problems use *Steady SIMPLEC* (works for the
+built-in cases too): Re=1000 converges in a few thousand iterations, whereas
+time-marching has to integrate tens of convective time units. Use the
+transient MAC projection for unsteady physics (vortex shedding, convection
+rolls) — it is exact in continuity and GPU-friendly.
+
+**GPU code paths** are tested without a GPU through `tests/fake_gpu.py`, a
+NumPy-backed stand-in for CuPy (including CuPy's DCT/DST type limits), which
+checks that every GPU-specific branch gives the same results as the CPU path.
+
+**Windows:** double-click `start_flowtrace.bat` (installs on first run, then opens
+the dashboard). Sample Fluent meshes are in `examples/`.
 
 ## Honest limits / roadmap
 
