@@ -116,6 +116,7 @@ class FVMesh:
         self.yb_h = np.abs(np.einsum("fd,fd->f", db, Sb)) / np.sqrt(SSb)  # owner centre to face, normal
         dev = lambda a, dt=self.dtype: xp.asarray(a, dtype=dt)  # noqa: E731
         self.P, self.N, self.Pb = xp.asarray(P), xp.asarray(N), xp.asarray(Pb)
+        self.Pb_h = Pb
         self.S, self.Sb = dev(S), dev(Sb)
         self.d, self.db = dev(d), dev(db)
         self.w = dev(w)

@@ -146,6 +146,26 @@ def validate_unstructured(solver, info=None) -> dict:
         err = float(np.abs(solver.fields()["x-velocity"] - ue).max())
         checks.append({"name": "Transient Taylor-Green error vs exact (periodic mesh)", "value": err,
                        "reference": 0.0, "unit": "|u - u_exact|", "pass": err < 0.02})
+    elif kind == "mixing_layer":
+        from math import erf
+
+        xc = solver.cell_centres()
+        Y = solver.fields()["tracer"]
+        cols = np.unique(np.round(xc[:, 0], 12))
+        x0 = cols[np.argmin(np.abs(cols - 1.0))]
+        sel = np.abs(xc[:, 0] - x0) < 1e-9
+        y = xc[sel, 1]
+        ye = np.array([0.5 * (1.0 + erf((yy - 0.5) / np.sqrt(4.0 * info["D"] * x0))) for yy in y])
+        err = float(np.abs(Y[sel] - ye).max())
+        checks.append({"name": "Species profile at x = 1 vs analytic erf solution", "value": err, "reference": 0.0,
+                       "unit": "max |dY|", "pass": err < 0.02})
+        fb = solver.be.to_numpy(solver.Fb)
+        yb = solver.be.to_numpy(solver.Y["tracer"])[solver.fv.Pb_h] if hasattr(solver.fv, "Pb_h") else None
+        if yb is not None:
+            inflow = float(-(fb[fb < 0] * solver.be.to_numpy(solver.Yb["tracer"])[fb < 0]).sum())
+            outflow = float((fb[fb > 0] * yb[fb > 0]).sum())
+            checks.append({"name": "Species conservation (out / in)", "value": outflow / inflow, "reference": 1.0,
+                           "unit": "ratio", "pass": abs(outflow / inflow - 1.0) < 1e-4})
     mb = solver.mass_balance()
     if mb:
         scale = max(max(abs(v) for v in mb.values()), 1e-30)

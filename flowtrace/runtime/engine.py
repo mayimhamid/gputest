@@ -494,7 +494,8 @@ class Job:
             pts = s.cell_centres()
             f = s.fields()
             fields = {k: v for k, v in f.items() if k in ("x-velocity", "y-velocity", "z-velocity", "pressure",
-                                                           "temperature", "turb-kinetic-energy", "specific-diss-rate")}
+                                                           "temperature", "turb-kinetic-energy", "specific-diss-rate")
+                      or k in s.case.species}
             bnd = {k: _jsonable(v.__dict__) for k, v in s.zone_specs.items()}
             energy = s.energy
             nu = s.case.viscosity / s.case.density

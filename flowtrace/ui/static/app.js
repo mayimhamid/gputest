@@ -223,7 +223,7 @@ function renderZoneTable(info) {
       <div class="row" style="margin-top:4px">
         <select data-k="kind" style="width:96px">${kinds.map((k) => `<option ${k === b.kind ? "selected" : ""}>${k}</option>`).join("")}</select>
         <input type="text" data-k="val" title="inlet: normal speed or u,v${dim === 3 ? ",w" : ""}; wall: wall velocity u,v${dim === 3 ? ",w" : ""}; outlet: gauge pressure" placeholder="speed / u,v / p" value="${b.kind === "inlet" ? (b.normal_speed ?? 1) : ""}">
-        <input type="text" data-k="therm" title="T=value (fixed temperature) or q=value (heat flux into the domain); add e=0.8 for the radiation emissivity" placeholder="T=… / q=… e=…" value="">
+        <input type="text" data-k="therm" title="T=value (fixed temperature) or q=value (heat flux into the domain); e=0.8 radiation emissivity; name=value for species (e.g. co2=0.1)" placeholder="T=… q=… e=… co2=…" value="">
       </div></td></tr>`;
   }).join("");
 }
@@ -246,6 +246,9 @@ function zoneSpecs() {
       else if (!Number.isNaN(+th)) { spec.thermal = "temperature"; spec.value = +th; }
       const e = th.match(/(?:^|\s)e\s*=\s*([0-9.]+)/);
       if (e) spec.emissivity = +e[1];
+      for (const mm of th.matchAll(/(?:^|\s)([A-Za-z][\w\-]*)\s*=\s*([-+0-9.eE]+)/g)) {
+        if (!["T", "t", "q", "Q", "e"].includes(mm[1])) { spec.species = spec.species || {}; spec.species[mm[1]] = +mm[2]; }
+      }
     }
     out[tr.dataset.zone] = spec;
   });
@@ -260,6 +263,7 @@ function modelSettings() {
     turb_scheme: $("#turbScheme").value, radiation: $("#radModel").value, absorption: +$("#radA").value,
     periodic_pressure_gradient: vec($("#perG").value), unsteady: $("#unsteady").checked, dt: +$("#uDt").value,
     t_end: +$("#uTend").value, inner_iterations: +$("#uInner").value, time_scheme: $("#uTimeScheme").value,
+    species: $("#species").value.split(/[ ,;]+/).filter((x) => x), species_diffusivity: +$("#speciesD").value,
   };
 }
 function readParams() {

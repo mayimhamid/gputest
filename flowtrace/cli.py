@@ -159,7 +159,10 @@ def _parse_bc(items):
                 spec["pressure"] = nums[0]
         if len(parts) > 2 and parts[2]:
             for t in parts[2].split(","):
-                if t.startswith("q"):
+                if "=" in t:
+                    nm, _, val = t.partition("=")
+                    spec.setdefault("species", {})[nm] = float(val)
+                elif t.startswith("q"):
                     spec["thermal"], spec["value"] = "flux", float(t[1:])
                 elif t.startswith("e"):
                     spec["emissivity"] = float(t[1:])
@@ -181,7 +184,8 @@ def cmd_solve(args):
             "turb_viscosity_ratio": args.viscosity_ratio, "radiation": args.radiation, "absorption": args.absorption,
             "periodic": [p.split(",") for p in (args.periodic or [])],
             "periodic_pressure_gradient": [float(x) for x in args.dpdx.split(",")] if args.dpdx else [0.0, 0.0, 0.0],
-            "unsteady": args.unsteady, "dt": args.dt, "t_end": args.t_end, "inner_iterations": args.inner}
+            "unsteady": args.unsteady, "dt": args.dt, "t_end": args.t_end, "inner_iterations": args.inner,
+            "species": [x for x in (args.species or "").split(",") if x], "species_diffusivity": args.diffusivity}
     job = Job({"kind": "unstructured", "mesh_id": "m", "case": case}, EventHub(), args.workdir, meshes={"m": mesh})
     _follow(job, args.export)
 
@@ -261,10 +265,13 @@ def main(argv=None):
     p.add_argument("--dt", type=float, default=0.01)
     p.add_argument("--t-end", dest="t_end", type=float, default=1.0)
     p.add_argument("--inner", type=int, default=20, help="iterations per time step")
+    p.add_argument("--species", help="comma-separated passive species, values via --bc zone=inlet:1.0:co2=0.1")
+    p.add_argument("--diffusivity", type=float, default=1e-5)
     p.add_argument("--export")
     p.set_defaults(func=cmd_solve)
     p = sub.add_parser("case", help="run a built-in Fluent-style case (SST channel, flat plate, P-1 slab, ...)")
-    p.add_argument("preset", choices=["turbulent_channel", "flat_plate", "radiation_slab", "periodic_taylor_green"])
+    p.add_argument("preset", choices=["turbulent_channel", "flat_plate", "radiation_slab", "periodic_taylor_green",
+                                      "mixing_layer"])
     p.add_argument("--param", action="append", help="preset parameter, e.g. re_tau=590 ny=96")
     p.add_argument("--max-iter", dest="max_iter", type=int)
     p.add_argument("--backend", default="auto")

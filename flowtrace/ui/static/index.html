@@ -105,6 +105,8 @@
             <label class="field">Radiation<select id="radModel"><option value="off">Off</option><option value="p1">P-1</option></select></label>
             <label class="field">Absorption coeff. (1/m)<input type="number" id="radA" value="1" step="any"></label>
             <label class="field">Periodic dp/dx (x,y,z)<input type="text" id="perG" placeholder="-1,0,0"></label>
+            <label class="field">Species (comma-separated)<input type="text" id="species" placeholder="e.g. co2,h2o"></label>
+            <label class="field">Species diffusivity D<input type="number" id="speciesD" value="1e-5" step="any"></label>
             <label class="field">Transient<input type="checkbox" id="unsteady"></label>
             <label class="field">Time step Δt<input type="number" id="uDt" value="0.01" step="any"></label>
             <label class="field">End time<input type="number" id="uTend" value="1" step="any"></label>

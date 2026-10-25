@@ -84,7 +84,28 @@ def periodic_taylor_green(n: int = 32, re: float = 10.0, dt: float = 0.05, t_end
     return mesh, case, {"kind": "taylor_green", "nu": 1.0 / re, "init": "taylor_green"}
 
 
+def mixing_layer(nx: int = 120, ny: int = 60, diffusivity: float = 1e-3, **kw):
+    """Two co-flowing streams (Y = 1 above, 0 below) mixing in uniform flow U = 1.
+    Exact: Y = (1 + erf((y - 0.5) / sqrt(4 D x / U))) / 2 while the layer is thin."""
+    mesh = cartesian_mesh_2d(nx, ny, 2.0, 1.0, names=("inlet", "outlet", "bottom", "top"),
+                             types=("velocity-inlet", "pressure-outlet", "symmetry", "symmetry"))
+    mesh = split_zone(mesh, "inlet", lambda fc: np.where(fc[:, 1] > 0.5, "inlet-a", "inlet-b"),
+                      {"inlet-a": "velocity-inlet", "inlet-b": "velocity-inlet"})
+    case = UnstructuredCase(
+        name="Two-stream mixing layer (species transport)", viscosity=1e-3, density=1.0,
+        species=["tracer"], species_diffusivity=diffusivity, init_velocity=[1.0, 0.0, 0.0],
+        boundaries={"inlet-a": BoundarySpec("inlet", normal_speed=1.0, species={"tracer": 1.0}),
+                    "inlet-b": BoundarySpec("inlet", normal_speed=1.0, species={"tracer": 0.0}),
+                    "outlet": BoundarySpec("outlet"), "top": BoundarySpec("symmetry"),
+                    "bottom": BoundarySpec("symmetry")},
+        max_iter=1500, tol=1e-7, **kw)
+    return mesh, case, {"kind": "mixing_layer", "D": diffusivity}
+
+
 DESCRIPTIONS = {
+    "mixing_layer": ("Two-stream mixing (species transport)",
+                     "Passive species diffusing between two co-flowing streams; profile vs the analytic erf "
+                     "solution."),
     "turbulent_channel": ("Turbulent channel (k-ω SST, periodic)",
                           "Fully developed channel at Re_tau, periodic in x and driven by a mean pressure gradient; "
                           "compared with DNS bulk velocity and the log law."),
@@ -102,6 +123,7 @@ PRESETS = {
     "flat_plate": flat_plate,
     "radiation_slab": radiation_slab,
     "periodic_taylor_green": periodic_taylor_green,
+    "mixing_layer": mixing_layer,
 }
 
 

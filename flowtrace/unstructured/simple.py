@@ -81,6 +81,8 @@ class SimpleSolver:
             from .turbulence import SSTModel
 
             self.turb = SSTModel(self)
+        self.Y = {name: xp.zeros(self.nc, dtype=self.dtype) for name in case.species}
+        self._build_species_boundaries()
         self.rad = None
         if case.radiation == "p1":
             from .radiation import P1Model
@@ -148,6 +150,53 @@ class SimpleSolver:
         self.m_sym = d(kind == SYMMETRY)
         self.m_dirvel = d((kind == WALL) | (kind == INLET) | (kind == SYMMETRY))
         self.singular_p = not bool(((kind == OUTLET) | (kind == PRESSURE)).any())
+
+    def _build_species_boundaries(self):
+        """Per-species boundary values and Dirichlet masks (inlets, openings, walls with a value)."""
+        xp, fv = self.xp, self.fv
+        self.Yb, self.Ydir = {}, {}
+        for name in self.case.species:
+            val = np.zeros(fv.n_bf)
+            fixed = np.zeros(fv.n_bf)
+            for z in self.mesh.boundary_zones():
+                m = fv.bzone == z.id
+                spec = self.zone_specs.get(z.name)
+                if spec is None or not m.any():
+                    continue
+                v = (spec.species or {}).get(name)
+                if spec.kind in ("inlet", "pressure"):
+                    val[m] = v or 0.0
+                    fixed[m] = 1.0 if spec.kind == "inlet" else 0.0
+                elif spec.kind == "outlet":
+                    val[m] = v or 0.0  # backflow value
+                elif spec.kind == "wall" and v is not None:
+                    val[m] = v
+                    fixed[m] = 1.0
+            self.Yb[name] = xp.asarray(val, dtype=self.dtype)
+            self.Ydir[name] = xp.asarray(fixed, dtype=self.dtype)
+
+    def _species(self) -> dict:
+        c, fv, xp = self.case, self.fv, self.xp
+        res = {}
+        rho = c.density
+        if self.turb is not None:
+            mut = self.turb.mut
+            gam = rho * c.species_diffusivity + fv.face_interp(mut) / c.schmidt_turbulent
+            gam_b = rho * c.species_diffusivity + mut[fv.Pb] / c.schmidt_turbulent * (1.0 - self.m_wall)
+        else:
+            gam, gam_b = rho * c.species_diffusivity, None
+        inflow = (self.m_inlet > 0) | ((self.m_pres > 0) & (self.Fb < 0))
+        for name, Y in self.Y.items():
+            fixed = (self.Ydir[name] > 0) | inflow
+            Yb = xp.where(fixed, self.Yb[name], Y[fv.Pb])
+            gY = fv.gradient(Y, Yb)
+            diag, aPN, aNP, Db = self._coefficients(gam, self.Ydir[name], gamma_b=gam_b)
+            rhs = self._rhs(gam, Y, gY, Yb, Db)
+            diag, rhs = self._time_terms(f"Y:{name}", Y, diag, rhs)
+            A = fv.matrix(diag, aPN, aNP)
+            res[name] = self._residual(A, diag, Y, rhs)
+            self.Y[name] = self._relax_solve(diag, aPN, aNP, rhs, Y, 1.0, tol=1e-3, maxiter=60)
+        return res
 
     def _velocity_bvals(self, U):
         fv, xp = self.fv, self.xp
@@ -254,6 +303,8 @@ class SimpleSolver:
         if self.turb is not None:
             cur["k"] = self.turb.k.copy()
             cur["omega"] = self.turb.om.copy()
+        for name, Y in getattr(self, "Y", {}).items():
+            cur[f"Y:{name}"] = Y.copy()
         for name, v in cur.items():
             prev = self._old.get(name, (v, v))[0]
             self._old[name] = (v, prev)
@@ -423,6 +474,10 @@ class SimpleSolver:
             gUn = [fv.gradient(self.U[:, k], ubn[:, k]) for k in range(dim)]
             res.update(self.turb.step(gUn))
             tm["turbulence"] += time.perf_counter() - t5
+        if self.Y:
+            t6 = time.perf_counter()
+            res.update(self._species())
+            tm["species"] += time.perf_counter() - t6
 
         self.iteration += 1
         self.step_count = self.iteration
@@ -526,6 +581,8 @@ class SimpleSolver:
             out.update(self.turb.fields())
         if self.rad is not None:
             out["incident-radiation"] = h(self.rad.G).astype(np.float64)
+        for name, Y in self.Y.items():
+            out[name] = h(Y).astype(np.float64)
         if names:
             out = {k: v for k, v in out.items() if k in names}
         return out
@@ -639,6 +696,8 @@ class SimpleSolver:
             st["mut"] = h(self.turb.mut)
         if self.rad is not None:
             st["G"] = h(self.rad.G)
+        for name, Y in self.Y.items():
+            st[f"Y:{name}"] = h(Y)
         return st
 
     def load_state(self, st: dict):
@@ -654,6 +713,9 @@ class SimpleSolver:
             self.turb.k, self.turb.om, self.turb.mut = dev(st["k"]), dev(st["omega"]), dev(st["mut"])
         if self.rad is not None and "G" in st:
             self.rad.G = dev(st["G"])
+        for name in self.Y:
+            if f"Y:{name}" in st:
+                self.Y[name] = dev(st[f"Y:{name}"])
         self.iteration = int(st.get("iteration", 0))
         if float(st.get("res_continuity_norm", 0.0)) > 0:
             self._res_max5["continuity"] = float(st["res_continuity_norm"])

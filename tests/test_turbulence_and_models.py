@@ -5,8 +5,8 @@ from flowtrace.hardware.backend import get_backend
 from flowtrace.mesh.unstructured import (cartesian_mesh_2d, compute_geometry, match_periodic, split_zone, stretch,
                                          wall_distance)
 from flowtrace.unstructured.case import BoundarySpec, UnstructuredCase, default_boundaries, default_periodic_pairs
-from flowtrace.unstructured.presets import (apply_initial_condition, flat_plate, periodic_taylor_green,
-                                            radiation_slab, turbulent_channel)
+from flowtrace.unstructured.presets import (apply_initial_condition, flat_plate, mixing_layer,
+                                            periodic_taylor_green, radiation_slab, turbulent_channel)
 from flowtrace.unstructured.simple import SimpleSolver
 from flowtrace.unstructured.turbulence import spalding_utau
 from flowtrace.validation.checks import validate_unstructured
@@ -133,3 +133,12 @@ def test_turbulent_state_roundtrip():
         a.step()
         b.step()
     assert np.abs(a.fields()["x-velocity"] - b.fields()["x-velocity"]).max() < 1e-10
+
+
+def test_species_mixing_layer():
+    mesh, case, info = mixing_layer(nx=80, ny=40)
+    s = run(SimpleSolver(mesh, case, be))
+    checks = validate_unstructured(s, info)["checks"]
+    assert all(c["pass"] for c in checks), checks
+    Y = s.fields()["tracer"]
+    assert -1e-6 <= Y.min() and Y.max() <= 1 + 1e-6

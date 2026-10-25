@@ -40,6 +40,8 @@ class BoundarySpec:
     outlet:    static gauge ``pressure``; zero-gradient velocity, T, k, omega
                (backflow uses the inlet-style turbulence values).
     pressure:  pressure inlet/opening: given static ``pressure``, inflow allowed, T = value.
+    ``species``: {name: value} at inlets/openings (and on walls to fix a wall value;
+               walls are zero-flux otherwise).
     symmetry:  slip, zero normal flux.
     periodic:  translational periodic zone; pair it with ``UnstructuredCase.periodic``.
     """
@@ -53,6 +55,7 @@ class BoundarySpec:
     turb_intensity: Optional[float] = None
     turb_viscosity_ratio: Optional[float] = None
     emissivity: float = 1.0
+    species: Optional[Dict[str, float]] = None  # inlet/backflow (or fixed wall) values per species
 
     def __post_init__(self):
         if self.kind not in KINDS:
@@ -104,6 +107,10 @@ class UnstructuredCase:
     radiation: str = "off"  # off | p1
     absorption: float = 1.0  # 1/m
     scattering: float = 0.0  # 1/m
+    # --- species transport (Fluent: species / user-defined scalars, non-reacting) ---
+    species: List[str] = field(default_factory=list)
+    species_diffusivity: float = 1e-5  # mass diffusivity D (m^2/s); flux = rho D grad Y
+    schmidt_turbulent: float = 0.7
     # --- reports ---
     ref_velocity: float = 1.0
     ref_area: float = 1.0
