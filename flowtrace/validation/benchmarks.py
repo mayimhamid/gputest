@@ -129,9 +129,15 @@ DVD_SRC = "de Vahl Davis, Int. J. Numer. Meth. Fluids 3 (1983)"
 
 
 def _be(ctx):
+    """Benchmarks run in FP64 on the CPU unless a backend is named: the published numbers
+    must not depend on whether a consumer GPU (FP32 by default) is present. GPU results
+    come from ``flowtrace gpu-report``."""
     from ..hardware.backend import get_backend
 
-    return get_backend(ctx.get("backend", "auto"))
+    name = ctx.get("backend", "auto")
+    if name in (None, "auto", "cpu"):
+        name = "numba" if _has_numba() else "numpy"
+    return get_backend(name)
 
 
 def _run_mac(solver, k=10):

@@ -1,0 +1,33 @@
+name: Bug report
+description: Something crashes, hangs or behaves unexpectedly
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: What you ran, what you expected, what you got (paste the full error).
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: How to reproduce
+      description: The exact `flowtrace ...` command or a minimal Python script. Attach the mesh if possible.
+      render: shell
+    validations:
+      required: true
+  - type: textarea
+    id: probe
+    attributes:
+      label: Output of `flowtrace probe`
+      render: text
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: FlowTrace version
+      placeholder: "python -c \"import flowtrace; print(flowtrace.__version__)\""
+    validations:
+      required: true

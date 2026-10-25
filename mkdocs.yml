@@ -1,0 +1,81 @@
+site_name: FlowTrace
+site_description: Hardware-aware CFD solver and warm-start companion for Ansys Fluent (compatible, not affiliated)
+docs_dir: docs
+strict: true
+
+theme:
+  name: material
+  features:
+    - navigation.sections
+    - navigation.top
+    - content.code.copy
+    - search.suggest
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: indigo
+      toggle: {icon: material/weather-night, name: Dark mode}
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: indigo
+      toggle: {icon: material/weather-sunny, name: Light mode}
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - tables
+  - toc: {permalink: true}
+  - pymdownx.superfences
+  - pymdownx.arithmatex: {generic: true}
+  - pymdownx.snippets: {base_path: [".", "docs"], check_paths: true}
+
+extra_javascript:
+  - javascripts/mathjax-config.js
+  - https://cdn.jsdelivr.net/npm/mathjax@3.2.2/es5/tex-mml-chtml.js
+
+plugins:
+  - search
+  - mkdocs-jupyter:
+      execute: false
+      include_source: true
+  - mkdocstrings:
+      handlers:
+        python:
+          paths: ["."]
+          options:
+            show_source: false
+            docstring_style: numpy
+            show_root_heading: true
+            members_order: source
+            filters: ["!^_"]
+
+nav:
+  - Home: index.md
+  - Installation: install.md
+  - User guide:
+      - Command line: user-guide/cli.md
+      - Dashboard: user-guide/dashboard.md
+      - Python API and case files: user-guide/python-api.md
+      - Ansys Fluent workflow: user-guide/fluent.md
+      - GPU and hardware planner: user-guide/gpu.md
+  - Theory manual:
+      - Structured MAC solver: theory/mac.md
+      - Pressure-based unstructured solver: theory/simplec.md
+      - Turbulence models: theory/turbulence.md
+      - CHT, rotating frames, periodic zones: theory/zones.md
+      - Verification methodology: theory/verification.md
+  - Validation:
+      - Validation report: validation/index.md
+      - Fluent warm-start study: validation/warmstart.md
+      - GPU log: validation/gpu.md
+  - Tutorials:
+      - Cavity, MMS and grid convergence: tutorials/01_cavity_and_verification.ipynb
+      - Turbulent channel (SST vs DNS): tutorials/02_turbulent_channel.ipynb
+      - Fluent warm start from a Python script: tutorials/03_fluent_warmstart.ipynb
+  - API reference:
+      - Cases and solvers: api/solvers.md
+      - Meshes and Fluent I/O: api/mesh.md
+      - Validation tools: api/validation.md
+  - Design notes:
+      - Compressible flow (proposal): design/compressible-flow.md
+  - Trademarks and licence: legal.md

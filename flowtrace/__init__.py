@@ -14,6 +14,6 @@ import os as _os
 _os.environ.setdefault("OMP_WAIT_POLICY", "PASSIVE")
 _os.environ.setdefault("KMP_BLOCKTIME", "0")
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 
 __all__ = ["__version__"]

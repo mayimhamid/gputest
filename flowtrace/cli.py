@@ -316,8 +316,11 @@ def cmd_ui(args):
 def main(argv=None):
     common = argparse.ArgumentParser(add_help=False)
     common.add_argument("--workdir", default="flowtrace_runs", help="runs, checkpoints and exports go here")
+    from . import __version__
+
     ap = argparse.ArgumentParser(prog="flowtrace", description="FlowTrace heterogeneous CFD solver",
                                  parents=[common])
+    ap.add_argument("--version", action="version", version=f"FlowTrace {__version__}")
     sub = ap.add_subparsers(dest="cmd")
     _add = sub.add_parser
 

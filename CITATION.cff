@@ -1,0 +1,24 @@
+cff-version: 1.2.0
+message: "If you use FlowTrace in published work, please cite it as below."
+title: "FlowTrace: a hardware-aware CFD solver and warm-start companion for Ansys Fluent"
+abstract: >-
+  FlowTrace is an open-source Python CFD solver (incompressible Navier-Stokes,
+  Boussinesq energy, RANS turbulence, conjugate heat transfer, moving reference
+  frames) that measures the CPU and GPU of the machine it runs on and places
+  each stage of the solve where it is fastest. It reads and writes Ansys Fluent
+  mesh, case, data and interpolation files, so a FlowTrace solution can
+  initialise a Fluent run (warm start).
+type: software
+authors:
+  - name: "mayimhamid"
+  - name: "FlowTrace contributors"
+license: MIT
+version: 0.2.0
+date-released: "2026-10-25"
+keywords:
+  - computational fluid dynamics
+  - SIMPLEC
+  - RANS
+  - GPU computing
+  - verification and validation
+  - Ansys Fluent interoperability

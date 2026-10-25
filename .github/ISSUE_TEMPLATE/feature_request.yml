@@ -1,0 +1,21 @@
+name: Feature request
+description: Suggest a capability (physics, Fluent interoperability, hardware support, UI)
+labels: [enhancement]
+body:
+  - type: textarea
+    id: need
+    attributes:
+      label: What do you need and why?
+      description: The engineering task this would enable.
+    validations:
+      required: true
+  - type: textarea
+    id: validation
+    attributes:
+      label: How would we know it works?
+      description: A verification or validation case with a published reference, if you know one.
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options: [Physics / models, Ansys Fluent interoperability, Performance / GPU, Dashboard, Documentation, Other]

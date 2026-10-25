@@ -1,0 +1,30 @@
+name: Validation discrepancy
+description: A FlowTrace result disagrees with a reference (experiment, DNS, analytic, or another solver)
+labels: [validation]
+body:
+  - type: textarea
+    id: case
+    attributes:
+      label: Case
+      description: Geometry, Reynolds/Rayleigh number, boundary conditions, mesh (attach it), turbulence model.
+    validations:
+      required: true
+  - type: textarea
+    id: result
+    attributes:
+      label: FlowTrace result vs reference
+      description: The quantity, FlowTrace's value, the reference value and its source (paper, DOI, data file), and the tolerance you expect.
+    validations:
+      required: true
+  - type: textarea
+    id: convergence
+    attributes:
+      label: Convergence evidence
+      description: Final residuals, grid study (if any), and whether the run converged.
+  - type: textarea
+    id: command
+    attributes:
+      label: Command or script
+      render: shell
+    validations:
+      required: true
