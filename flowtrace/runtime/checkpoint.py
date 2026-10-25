@@ -27,7 +27,7 @@ class CheckpointWriter:
         self._q: "queue.Queue" = queue.Queue(maxsize=2)
         self._thread = threading.Thread(target=self._run, name="flowtrace-checkpoint", daemon=True)
         self._thread.start()
-        self.written = []
+        self.written: list = []
         self.last_error: Optional[str] = None
         self.bytes_written = 0
         self.seconds = 0.0

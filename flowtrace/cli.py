@@ -4,9 +4,12 @@
   flowtrace probe                      show what FlowTrace sees on this machine
   flowtrace bench                      micro-benchmark every backend
   flowtrace run cavity --re 1000 --n 256 [--backend cupy] [--export out/]
-  flowtrace mesh path/to/mesh.msh      inspect a Fluent mesh
-  flowtrace solve path/to/mesh.msh --bc inlet=inlet:1.0 --bc outlet=outlet --nu 0.01 --export out/
+  flowtrace mesh path/to/mesh.msh      inspect a Fluent mesh (.msh/.cas/.cas.h5) + quality report
+  flowtrace quality path/to/mesh.msh   orthogonal quality / skewness / aspect ratio (exit 2 if critical)
+  flowtrace solve path/to/mesh.msh --bc inlet=inlet:1.0 --bc outlet=outlet --mu 0.01 --export out/
+  flowtrace fluent-warmstart case.cas.h5 --turbulence k-omega-sst --out ws/   pre-solve for Fluent
   flowtrace validate                   run the validation suite (cavity, convection, Taylor-Green ...)
+  flowtrace benchmark [--tier full]    reproducible benchmarks + HTML/PDF report (every published number)
 """
 
 from __future__ import annotations
@@ -16,6 +19,8 @@ import json
 import os
 import sys
 import time
+
+import numpy as np
 
 
 def _print_plan(plan):
@@ -57,7 +62,6 @@ def cmd_bench(args):
 
 
 def cmd_run(args):
-    from .hardware.planner import plan_structured
     from .runtime.engine import EventHub, Job
 
     params = {}
@@ -102,18 +106,83 @@ def cmd_run(args):
 
 
 def cmd_mesh(args):
-    from .mesh.fluent_msh import read_fluent_mesh
-    from .mesh.unstructured import compute_geometry
+    from .mesh.fluent_h5 import read_any_mesh
+    from .mesh.quality import mesh_quality
 
     t0 = time.perf_counter()
-    m = read_fluent_mesh(args.path)
-    g = compute_geometry(m)
+    m, fmt = read_any_mesh(args.path)
     s = m.summary()
-    print(f"{s['name']}: {s['dim']}D, {s['cells']:,} cells, {s['faces']:,} faces, {s['nodes']:,} nodes "
+    print(f"{s['name']} ({fmt}): {s['dim']}D, {s['cells']:,} cells, {s['faces']:,} faces, {s['nodes']:,} nodes "
           f"(read in {time.perf_counter() - t0:.2f} s)")
-    print(f"volume {g.total_volume:.6g}, left-handed faces repaired: {g.flipped_faces}")
     for z in s["zones"]:
         print(f"  zone {z['id']:>4}  {z['kind']:<4} {z['type']:<18} {z['name']:<24} {z['count']:,}")
+    for p in m.periodic:
+        print(f"  periodic pair: zone {p['zone_a']} <-> {p['zone_b']}, translation {np.round(p['translation'], 6)}")
+    print()
+    print(mesh_quality(m).summary())
+
+
+def cmd_quality(args):
+    from .mesh.fluent_h5 import read_any_mesh
+    from .mesh.quality import mesh_quality
+
+    m, _ = read_any_mesh(args.path)
+    q = mesh_quality(m)
+    if args.json:
+        print(json.dumps(q.to_dict(), indent=1))
+    else:
+        print(q.summary())
+    sys.exit(0 if q.ok else 2)
+
+
+def cmd_h5_inspect(args):
+    from .mesh.fluent_h5 import describe_h5
+
+    print(describe_h5(args.path, args.max))
+
+
+def _apply_mesh_options(mesh, args):
+    from .mesh.unstructured import make_periodic
+
+    for spec in args.periodic or []:
+        a, _, b = spec.partition(":")
+        make_periodic(mesh, a, b)
+    return mesh
+
+
+def _case_from_args(args, name):
+    from .unstructured.case import UnstructuredCase
+
+    solids = {}
+    for s in args.solid or []:
+        parts = s.split(":")
+        solids[parts[0]] = {"conductivity": float(parts[1]), "source": float(parts[2]) if len(parts) > 2 else 0.0}
+    mrf = {}
+    for s in args.mrf or []:
+        parts = s.split(":")
+        rot = {"omega": float(parts[1])}
+        if len(parts) > 2:
+            rot["origin"] = [float(x) for x in parts[2].split(",")]
+        mrf[parts[0]] = rot
+    return UnstructuredCase(name=name, boundaries=_parse_bc(args.bc), density=args.rho, viscosity=args.mu,
+                            energy=args.energy or bool(solids), conductivity=args.k, cp=args.cp,
+                            max_iter=args.max_iter, tol=args.tol, backend=args.backend, algorithm=args.algorithm,
+                            turbulence=args.turbulence, solids=solids, mrf=mrf,
+                            body_force=[float(x) for x in args.body_force.split(",")] + [0.0] * 2
+                            if args.body_force else [0.0, 0.0, 0.0])
+
+
+def cmd_fluent_warmstart(args):
+    from .fluent.warmstart import run_warmstart
+    from .mesh.fluent_h5 import read_any_mesh  # noqa: F401  (fails early without h5py for .h5 input)
+
+    case = _case_from_args(args, os.path.basename(args.path))
+    rep = run_warmstart(args.path, case, args.out, iterations_fluent=args.fluent_iterations,
+                        setup_physics=args.setup_physics, allow_bad_mesh=args.allow_bad_mesh)
+    print(f"\nFlowTrace: {rep['iterations']} iterations, {'converged' if rep['converged'] else 'NOT converged'}, "
+          f"{rep['solve_seconds']:.1f} s")
+    for k, v in rep["files"].items():
+        print(f"  {k:<7} {v}")
 
 
 def _parse_bc(items):
@@ -145,13 +214,14 @@ def _parse_bc(items):
 
 
 def cmd_solve(args):
-    from .mesh.fluent_msh import read_fluent_mesh
+    from dataclasses import asdict
+
+    from .mesh.fluent_h5 import read_any_mesh
     from .runtime.engine import EventHub, Job
 
-    mesh = read_fluent_mesh(args.path)
-    case = {"name": os.path.basename(args.path), "boundaries": _parse_bc(args.bc), "density": args.rho,
-            "viscosity": args.mu, "energy": args.energy, "conductivity": args.k, "cp": args.cp,
-            "max_iter": args.max_iter, "tol": args.tol, "backend": args.backend, "algorithm": args.algorithm}
+    mesh, _ = read_any_mesh(args.path)
+    _apply_mesh_options(mesh, args)
+    case = asdict(_case_from_args(args, os.path.basename(args.path)))
     hub = EventHub()
     q = hub.subscribe()
     job = Job({"kind": "unstructured", "mesh_id": "m", "case": case}, hub, args.workdir, meshes={"m": mesh})
@@ -182,6 +252,59 @@ def cmd_validate(args):
 
     ok = run_suite(quick=not args.full, backend=args.backend)
     sys.exit(0 if ok else 1)
+
+
+def cmd_benchmark(args):
+    from .validation.benchmarks import REGISTRY, run_benchmarks
+
+    if args.list:
+        for b in REGISTRY.values():
+            print(f"{b.id:<36} {','.join(b.tiers):<11} {b.category:<17} {b.title}")
+        return
+    ids = [s for s in (args.only or "").split(",") if s] or None
+    data = run_benchmarks(ids=ids, tier=args.tier, backend=args.backend, out_dir=args.out)
+    s = data["summary"]
+    print(f"\n{s['passed']}/{s['total']} benchmarks passed" + (f"; report in {args.out}" if args.out else ""))
+    sys.exit(0 if s["passed"] == s["total"] else 1)
+
+
+def cmd_warmstart_study(args):
+    from .fluent.warmstart_study import CASES, run_study
+
+    cases = [s for s in (args.cases or "").split(",") if s] or None
+    if cases:
+        bad = set(cases) - set(CASES)
+        if bad:
+            sys.exit(f"unknown case(s) {sorted(bad)}; choose from {sorted(CASES)}")
+    data = run_study(args.out, cases=cases, backend=args.backend, fluent=not args.no_fluent, tol=args.tol)
+    print(f"\nresults: {os.path.join(args.out, 'results.md')}")
+    for r in data["fluent"]:
+        if r["status"] != "measured":
+            print(f"Fluent {r['case']}: not run - {r['message']}")
+
+
+def cmd_parse_transcript(args):
+    from .fluent.warmstart_study import parse_transcript
+
+    res = {}
+    for p in args.paths:
+        with open(p, encoding="utf-8", errors="ignore") as fh:
+            res[p] = parse_transcript(fh.read())
+        r = res[p]
+        print(f"{p}: {r['iterations']} iterations, converged={r['converged']}")
+    if len(args.paths) == 2 and all(res[p]["iterations"] for p in args.paths):
+        a, b = (res[p]["iterations"] for p in args.paths)
+        print(f"ratio {args.paths[0]} / {args.paths[1]} = {a / b:.2f}")
+
+
+def cmd_gpu_report(args):
+    from .hardware.gpu_report import run_gpu_report
+
+    sizes = tuple(int(s) for s in args.sizes.split(","))
+    data = run_gpu_report(args.out, sizes=sizes)
+    if data.get("gpu_status"):
+        print(data["gpu_status"])
+    print(f"GPU log written to {args.out}")
 
 
 def cmd_ui(args):
@@ -224,27 +347,74 @@ def main(argv=None):
     p.add_argument("--checkpoint", type=float, default=0.0, help="seconds between async checkpoints")
     p.add_argument("--export", help="write the Fluent hand-off package to this directory")
     p.set_defaults(func=cmd_run)
-    p = sub.add_parser("mesh", help="inspect a Fluent mesh")
+    p = sub.add_parser("mesh", help="inspect a Fluent mesh (.msh/.cas/.cas.h5/.msh.h5) and its quality")
     p.add_argument("path")
     p.set_defaults(func=cmd_mesh)
-    p = sub.add_parser("solve", help="solve on a Fluent mesh with SIMPLE/SIMPLEC")
+    p = sub.add_parser("quality", help="mesh quality report (orthogonal quality, skewness, aspect ratio)")
     p.add_argument("path")
-    p.add_argument("--bc", action="append", help="zone=kind[:values[:T|q]]  e.g. inlet=inlet:1.0:T300  lid=wall:1,0")
-    p.add_argument("--rho", type=float, default=1.0)
-    p.add_argument("--mu", type=float, default=0.01)
-    p.add_argument("--k", type=float, default=0.01)
-    p.add_argument("--cp", type=float, default=1.0)
-    p.add_argument("--energy", action="store_true")
-    p.add_argument("--algorithm", default="SIMPLEC")
-    p.add_argument("--max-iter", dest="max_iter", type=int, default=3000)
-    p.add_argument("--tol", type=float, default=1e-5)
-    p.add_argument("--backend", default="auto")
+    p.add_argument("--json", action="store_true")
+    p.set_defaults(func=cmd_quality)
+    p = sub.add_parser("h5-inspect", help="print the group/dataset tree of an HDF5 (.cas.h5/.dat.h5) file")
+    p.add_argument("path")
+    p.add_argument("--max", type=int, default=400)
+    p.set_defaults(func=cmd_h5_inspect)
+
+    def physics_args(p):
+        p.add_argument("path")
+        p.add_argument("--bc", action="append", help="zone=kind[:values[:T|q]]  e.g. inlet=inlet:1.0:T300  lid=wall:1,0")
+        p.add_argument("--rho", type=float, default=1.0)
+        p.add_argument("--mu", type=float, default=0.01)
+        p.add_argument("--k", type=float, default=0.01, help="fluid thermal conductivity")
+        p.add_argument("--cp", type=float, default=1.0)
+        p.add_argument("--energy", action="store_true")
+        p.add_argument("--turbulence", default="laminar",
+                       choices=["laminar", "k-omega-sst", "k-epsilon-realizable", "k-epsilon-standard"])
+        p.add_argument("--solid", action="append", help="zone:conductivity[:volumetric source]  (conjugate heat transfer)")
+        p.add_argument("--mrf", action="append", help="cell zone:omega[:x0,y0[,z0]]  (moving reference frame)")
+        p.add_argument("--periodic", action="append", help="zoneA:zoneB  translational periodic pair")
+        p.add_argument("--body-force", dest="body_force", help="fx,fy[,fz] per unit volume (e.g. -dp/dx)")
+        p.add_argument("--algorithm", default="SIMPLEC")
+        p.add_argument("--max-iter", dest="max_iter", type=int, default=3000)
+        p.add_argument("--tol", type=float, default=1e-5)
+        p.add_argument("--backend", default="auto")
+
+    p = sub.add_parser("solve", help="solve on a Fluent mesh with SIMPLE/SIMPLEC")
+    physics_args(p)
     p.add_argument("--export")
     p.set_defaults(func=cmd_solve)
+    p = sub.add_parser("fluent-warmstart", help="pre-solve a Fluent case; write .ip (+.dat.h5), journal, PyFluent script")
+    physics_args(p)
+    p.add_argument("--out", default="flowtrace_warmstart")
+    p.add_argument("--fluent-iterations", dest="fluent_iterations", type=int, default=500)
+    p.add_argument("--setup-physics", dest="setup_physics", action="store_true",
+                   help="also set the viscous/energy models in the generated Fluent scripts")
+    p.add_argument("--allow-bad-mesh", dest="allow_bad_mesh", action="store_true")
+    p.set_defaults(func=cmd_fluent_warmstart)
     p = sub.add_parser("validate", help="run the validation suite")
     p.add_argument("--full", action="store_true")
     p.add_argument("--backend", default="auto")
     p.set_defaults(func=cmd_validate)
+    p = sub.add_parser("benchmark", help="reproducible benchmarks -> results.json + HTML/PDF/Markdown report")
+    p.add_argument("--tier", default="quick", choices=["quick", "full"])
+    p.add_argument("--only", help="comma-separated benchmark ids (see --list)")
+    p.add_argument("--list", action="store_true", help="list the benchmarks and exit")
+    p.add_argument("--backend", default="auto")
+    p.add_argument("--out", default="benchmarks/results", help="output directory ('' for none)")
+    p.set_defaults(func=cmd_benchmark)
+    p = sub.add_parser("warmstart-study", help="cold vs warm start: FlowTrace proxy (+ Ansys Fluent via PyFluent)")
+    p.add_argument("--cases", help="comma-separated: cavity,channel,step,cylinder,heated")
+    p.add_argument("--out", default="benchmarks/fluent_warmstart")
+    p.add_argument("--backend", default="auto")
+    p.add_argument("--tol", type=float, default=1e-5)
+    p.add_argument("--no-fluent", action="store_true", help="skip the Fluent runs even if PyFluent is installed")
+    p.set_defaults(func=cmd_warmstart_study)
+    p = sub.add_parser("gpu-report", help="GPU vs CPU correctness and speed log for this machine")
+    p.add_argument("--out", default="benchmarks/results")
+    p.add_argument("--sizes", default="64,128,256,512,1024")
+    p.set_defaults(func=cmd_gpu_report)
+    p = sub.add_parser("parse-transcript", help="count iterations in Fluent transcripts (e.g. cold.trn warm.trn)")
+    p.add_argument("paths", nargs="+")
+    p.set_defaults(func=cmd_parse_transcript)
     args = ap.parse_args(argv)
     if not getattr(args, "func", None):
         args = ap.parse_args(["ui"] + (argv or []))

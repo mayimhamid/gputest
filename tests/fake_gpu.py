@@ -57,9 +57,17 @@ class _Pool:
         pass
 
 
+_NAMES = ("cupy", "cupy.cuda", "cupy.cuda.runtime", "cupyx", "cupyx.scipy", "cupyx.scipy.fft",
+          "cupyx.scipy.sparse")
+_saved = {}
+
+
 def install():
     if "cupy" in sys.modules and getattr(sys.modules["cupy"], "__fake__", False):
         return sys.modules["cupy"]
+    # keep a real CuPy (if one was imported) so uninstall() can put it back
+    _saved.clear()
+    _saved.update({n: sys.modules[n] for n in _NAMES if n in sys.modules})
     cupy = types.ModuleType("cupy")
     cupy.__fake__ = True
     cupy.__version__ = "fake-13.0"
@@ -124,6 +132,7 @@ def install():
 
 
 def uninstall():
-    for name in ("cupy", "cupy.cuda", "cupy.cuda.runtime", "cupyx", "cupyx.scipy", "cupyx.scipy.fft",
-                 "cupyx.scipy.sparse"):
+    for name in _NAMES:
         sys.modules.pop(name, None)
+    sys.modules.update(_saved)
+    _saved.clear()

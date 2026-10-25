@@ -32,21 +32,39 @@ class FVMesh:
         geo = self.geometry = compute_geometry(mesh)
         nc = self.nc = mesh.n_cells
         interior = mesh.neighbour >= 0
-        self.if_idx = np.nonzero(interior)[0]
-        self.bf_idx = np.nonzero(~interior)[0]
-        P = mesh.owner[interior]
-        N = mesh.neighbour[interior]
-        Pb = mesh.owner[~interior]
+        boundary = ~interior
+        # translational periodic pairs become interior faces: owner of the face on
+        # side a, "neighbour" the owner of its image on side b, seen through the
+        # translation (its centre shifted by -T). Faces on side b are dropped.
+        pa = [np.asarray(p["faces_a"], dtype=np.int64) for p in mesh.periodic]
+        pb = [np.asarray(p["faces_b"], dtype=np.int64) for p in mesh.periodic]
+        shift = [np.repeat(np.asarray(p["translation"], dtype=float)[None, :dim], len(p["faces_a"]), axis=0)
+                 for p in mesh.periodic]
+        pa = np.concatenate(pa) if pa else np.zeros(0, np.int64)
+        pb = np.concatenate(pb) if pb else np.zeros(0, np.int64)
+        boundary[pa] = False
+        boundary[pb] = False
+        self.if_idx = np.concatenate([np.nonzero(interior)[0], pa])
+        self.bf_idx = np.nonzero(boundary)[0]
+        self.n_periodic = pa.size
+        P = np.concatenate([mesh.owner[interior], mesh.owner[pa]])
+        N = np.concatenate([mesh.neighbour[interior], mesh.owner[pb]])
+        Pb = mesh.owner[boundary]
         self.n_if, self.n_bf = P.size, Pb.size
         xc = geo.cell_centre
-        S = geo.face_area_vec[interior]
-        Sb = geo.face_area_vec[~interior]
-        xf = geo.face_centre[interior]
-        xfb = geo.face_centre[~interior]
-        d = xc[N] - xc[P]
+        S = geo.face_area_vec[self.if_idx]
+        Sb = geo.face_area_vec[boundary]
+        xf = geo.face_centre[self.if_idx]
+        xfb = geo.face_centre[boundary]
+        offset = np.concatenate([np.zeros((int(interior.sum()), dim))] + shift) if shift else np.zeros((P.size, dim))
+        xN = xc[N] - offset  # neighbour centre as seen from the owner
+        if np.any(P == N):
+            raise ValueError("a periodic face connects a cell to itself: use at least 2 cells across the period")
+        self.offset = offset
+        d = xN - xc[P]
         db = xfb - xc[Pb]
         dd = np.einsum("fd,fd->f", d, d)
-        w = np.clip(np.einsum("fd,fd->f", xc[N] - xf, d) / dd, 0.0, 1.0)  # owner weight
+        w = np.clip(np.einsum("fd,fd->f", xN - xf, d) / dd, 0.0, 1.0)  # owner weight
         Sd = np.einsum("fd,fd->f", S, d)
         Sdb = np.einsum("fd,fd->f", Sb, db)
         SS = np.einsum("fd,fd->f", S, S)
@@ -92,7 +110,7 @@ class FVMesh:
         self.indptr, self.indices = pat.indptr, pat.indices
 
         # boundary bookkeeping
-        self.bzone = mesh.face_zone[~interior]
+        self.bzone = mesh.face_zone[boundary]
         dev = lambda a, dt=self.dtype: xp.asarray(a, dtype=dt)  # noqa: E731
         self.P, self.N, self.Pb = xp.asarray(P), xp.asarray(N), xp.asarray(Pb)
         self.S, self.Sb = dev(S), dev(Sb)
@@ -101,15 +119,20 @@ class FVMesh:
         self.alpha, self.alpha_b = dev(alpha), dev(alpha_b)
         self.Tvec = dev(Tvec)
         self.Sb_mag = dev(np.sqrt(SSb))
-        self.nb = dev(Sb / np.sqrt(SSb)[:, None])
+        nb_h = Sb / np.sqrt(SSb)[:, None]
+        self.nb = dev(nb_h)
+        # tangential part of (boundary face centre - owner centre): zero-normal-gradient
+        # boundary values are phi_P + grad(phi)_P . db_t (exact for linear phi)
+        self.db_t = dev(db - np.einsum("fd,fd->f", db, nb_h)[:, None] * nb_h)
         self.vol = dev(geo.cell_volume)
         self.xc = dev(xc)
         self.xf = dev(xf)
         self.xfb = dev(xfb)
         self.wl, self.wlb = dev(wl), dev(wlb)
         self.Ginv = dev(Ginv)
+        self.xN = dev(xN)
         self.dP_f = dev(xf - xc[P])  # owner centre -> face
-        self.dN_f = dev(xf - xc[N])  # neighbour centre -> face
+        self.dN_f = dev(xf - xN)  # neighbour centre (through the periodic shift) -> face
         self.slot_diag_d = xp.asarray(self.slot_diag)
         self.slot_PN_d = xp.asarray(self.slot_PN)
         self.slot_NP_d = xp.asarray(self.slot_NP)
@@ -155,6 +178,18 @@ class FVMesh:
              + self.Cnei_d @ ((self.wl * dphi)[:, None] * self.d)
              + self.Cb_d @ ((self.wlb * dphib)[:, None] * self.db))
         return xp.einsum("cab,cb->ca", self.Ginv, r)
+
+    def gradient_gg(self, phi, phi_b, grad=None):
+        """Green-Gauss cell gradient (1/V) sum_f phi_f S_f with linearly interpolated
+        face values (plus a skewness correction from ``grad`` when given)."""
+        xp = self.xp
+        pf = self.face_interp(phi)
+        if grad is not None:
+            # correct the interpolated value from the point on the P-N line to the face centre
+            xm = self.w[:, None] * self.xc[self.P] + (1.0 - self.w)[:, None] * self.xN
+            pf = pf + xp.sum(self.face_interp_vec(grad) * (self.xf - xm), axis=1)
+        s = self.Cdiff_d @ (pf[:, None] * self.S) + self.Cb_d @ (phi_b[:, None] * self.Sb)
+        return s / self.vol[:, None]
 
     def face_interp(self, phi):
         return self.w * phi[self.P] + (1.0 - self.w) * phi[self.N]

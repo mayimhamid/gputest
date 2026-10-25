@@ -13,7 +13,6 @@ Boundary patch modes: 0 none, 1 fixed value, 2 adjacent interior value.
 from __future__ import annotations
 
 try:
-    import numba
     from numba import njit, prange
 
     HAVE_NUMBA = True

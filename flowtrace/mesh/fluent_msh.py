@@ -185,7 +185,7 @@ def read_fluent_mesh(path_or_bytes, name: str = None) -> UnstructuredMesh:
     face_blocks = []
     cell_blocks = []
     zone_info: Dict[int, Tuple[str, str]] = {}
-    total_nodes = total_cells = total_faces = 0
+    total_nodes = total_cells = 0
     periodic = []
     while True:
         sc.skip_ws()
@@ -263,8 +263,7 @@ def read_fluent_mesh(path_or_bytes, name: str = None) -> UnstructuredMesh:
             h = sc.read_header()
             vals5 = [_hex(t) for t in h[:5]] + [0] * (5 - len(h[:5]))
             zid, first, last, bctype, ftype = vals5
-            if zid == 0:
-                total_faces = last - first + 1 if last >= first else 0
+            if zid == 0:  # declaration of the total face count; faces are counted from the zones
                 sc.expect(b")")
                 continue
             nf = last - first + 1
@@ -332,8 +331,8 @@ def read_fluent_mesh(path_or_bytes, name: str = None) -> UnstructuredMesh:
                 if q < 0:
                     raise FluentMeshError(f"cannot skip binary section {index}")
                 sc.p = q
-                sc.read_token(); sc.read_token(); sc.read_token(); sc.read_token()
-                sc.read_token()
+                for _ in range(5):  # "End of Binary Section <index>"
+                    sc.read_token()
                 sc.expect(b")")
             else:
                 sc.skip_balanced()
@@ -368,12 +367,12 @@ def read_fluent_mesh(path_or_bytes, name: str = None) -> UnstructuredMesh:
 
     zones: Dict[int, Zone] = {}
     start = 0
-    for zid, first, bctype, cnts, *_ in face_blocks:
+    for zid, _first, bctype, cnts, *_ in face_blocks:
         ztype, zname = zone_info.get(zid, (BC_CODES.get(bctype, "wall"), f"zone-{zid}"))
         zones[zid] = Zone(zid, zname, ztype, "face", start, start + len(cnts) - 1)
         start += len(cnts)
     cell_zone = np.zeros(n_cells, dtype=np.int64)
-    for zid, first, last, ztype, etype in cell_blocks:
+    for zid, first, last, ztype, _etype in cell_blocks:
         cell_zone[first - 1:last] = zid
         zt, zn = zone_info.get(zid, ("fluid" if ztype == 1 else "solid", f"zone-{zid}"))
         zones[zid] = Zone(zid, zn, zt, "cell", first - 1, last - 1)
@@ -385,6 +384,17 @@ def read_fluent_mesh(path_or_bytes, name: str = None) -> UnstructuredMesh:
                             face_zone=fz.astype(np.int64), n_cells=n_cells, cell_zone=cell_zone,
                             zones=zones, name=name)
     mesh.periodic_pairs = periodic
+    if periodic:
+        from .unstructured import _face_geometry
+
+        fc, _ = _face_geometry(mesh)
+        for h, pairs in periodic:
+            za, zb = _hex(h[2]), _hex(h[3])
+            fa, fb = pairs[:, 0], pairs[:, 1]
+            if fa.size == 0 or fa.max() >= mesh.n_faces or fb.max() >= mesh.n_faces:
+                raise FluentMeshError("periodic face pairs refer to faces outside the mesh")
+            mesh.periodic.append({"zone_a": za, "zone_b": zb, "faces_a": fa, "faces_b": fb,
+                                  "translation": (fc[fb] - fc[fa]).mean(axis=0)})
     return mesh
 
 
@@ -482,6 +492,10 @@ def write_fluent_mesh(mesh: UnstructuredMesh, path: str, binary: bool = False, t
             w(b")\nEnd of Binary Section 2013)\n")
         else:
             w(("\n".join(" ".join(hx(v) for v in r) for r in rows) + "\n))\n").encode())
+    for p in mesh.periodic:
+        fa, fb = np.asarray(p["faces_a"]) + 1, np.asarray(p["faces_b"]) + 1
+        w(f"(18 (1 {hx(fa.size)} {hx(p['zone_a'])} {hx(p['zone_b'])})(\n".encode())
+        w(("\n".join(f"{hx(a)} {hx(b)}" for a, b in zip(fa, fb)) + "\n))\n").encode())
     for z in sorted(mesh.zones.values(), key=lambda z: z.id):
         w(f"(45 ({z.id} {z.type} {_zone_sym(z.name)})())\n".encode())
     data = out.getvalue()

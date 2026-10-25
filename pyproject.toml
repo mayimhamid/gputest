@@ -4,11 +4,29 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "flowtrace"
-version = "0.1.0"
-description = "FlowTrace: heterogeneous, hardware-aware CFD solver with Ansys Fluent interoperability"
+dynamic = ["version"]
+description = "Hardware-aware CFD solver and warm-start companion for Ansys Fluent (compatible, not affiliated)"
 readme = "README.md"
 requires-python = ">=3.9"
 license = { text = "MIT" }
+authors = [{ name = "mayimhamid" }]
+keywords = ["CFD", "Navier-Stokes", "SIMPLEC", "RANS", "k-omega SST", "GPU", "CuPy", "Fluent", "warm start"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Science/Research",
+    "Intended Audience :: Manufacturing",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: Microsoft :: Windows",
+    "Operating System :: POSIX :: Linux",
+    "Operating System :: MacOS",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Scientific/Engineering :: Physics",
+]
 dependencies = [
     "numpy>=1.22",
     "scipy>=1.8",
@@ -17,18 +35,28 @@ dependencies = [
 [project.optional-dependencies]
 # CPU JIT kernels (multi-core stencils)
 cpu = ["numba>=0.57", "psutil>=5.9"]
-# NVIDIA GPU backend. Pick the wheel that matches your CUDA driver:
-#   pip install cupy-cuda12x   (CUDA 12)   or   pip install cupy-cuda11x
-gpu = ["cupy-cuda12x>=12", "nvidia-ml-py>=11"]
+# NVIDIA GPU backend. Pick the wheel that matches your CUDA driver
+# (cupy-cuda12x for CUDA 12, cupy-cuda11x for CUDA 11); "[ctk]" also installs the
+# CUDA headers NVRTC needs for the fused CUDA kernels.
+gpu = ["cupy-cuda12x[ctk]>=13", "nvidia-ml-py>=11"]
 # Algebraic multigrid for unstructured pressure equations
 amg = ["pyamg>=4.2"]
+# Ansys Fluent CFF/HDF5 case and data files (.cas.h5 / .dat.h5)
+h5 = ["h5py>=3.6"]
+# Plots in the benchmark / validation reports (HTML, PDF)
+report = ["matplotlib>=3.5"]
 # Live link to a licensed Ansys Fluent installation
 fluent = ["ansys-fluent-core>=0.20"]
-dev = ["pytest>=7"]
-all = ["numba>=0.57", "psutil>=5.9", "pyamg>=4.2"]
+docs = ["mkdocs>=1.5", "mkdocs-material>=9", "mkdocstrings[python]>=0.24", "mkdocs-jupyter>=0.24"]
+dev = ["pytest>=7", "pytest-cov>=4", "ruff>=0.5", "mypy>=1.8", "pre-commit>=3", "build>=1", "h5py>=3.6",
+       "matplotlib>=3.5"]
+all = ["numba>=0.57", "psutil>=5.9", "pyamg>=4.2", "h5py>=3.6", "matplotlib>=3.5"]
 
 [project.scripts]
 flowtrace = "flowtrace.cli:main"
+
+[tool.setuptools.dynamic]
+version = { attr = "flowtrace.__version__" }
 
 [tool.setuptools.packages.find]
 include = ["flowtrace*"]
@@ -38,3 +66,35 @@ include = ["flowtrace*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+markers = ["slow: long-running validation tests"]
+
+[tool.coverage.run]
+source = ["flowtrace"]
+omit = ["flowtrace/fluent/bridge.py"]  # needs a licensed Fluent
+
+[tool.ruff]
+line-length = 130
+target-version = "py39"
+extend-exclude = ["docs/tutorials"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "B"]
+# I/J/l index names follow the discretisation's notation; lambdas are used as small local helpers
+ignore = ["E741", "E731", "B023", "B028", "B905"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["B011"]
+# embedded CSS / CUDA C++ source strings
+"flowtrace/validation/report.py" = ["E501"]
+"flowtrace/structured/cuda_kernels.py" = ["E501"]
+
+[tool.mypy]
+python_version = "3.10"
+ignore_missing_imports = true
+follow_imports = "silent"
+warn_unused_ignores = false
+check_untyped_defs = false
+# typed core modules (the numerics use NumPy/CuPy duck typing, checked by the tests)
+files = ["flowtrace/validation/gci.py", "flowtrace/validation/report.py", "flowtrace/mesh/quality.py",
+         "flowtrace/mesh/grading.py", "flowtrace/hardware/memory.py", "flowtrace/fluent/export.py",
+         "flowtrace/fluent/warmstart_study.py", "flowtrace/runtime/checkpoint.py"]

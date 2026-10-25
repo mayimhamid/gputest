@@ -42,6 +42,14 @@ class BoundarySpec:
     pressure: float = 0.0
     thermal: str = "adiabatic"
     value: float = 0.0
+    # turbulence at inlets / backflow (None: the case defaults)
+    turb_intensity: Optional[float] = None
+    turb_viscosity_ratio: Optional[float] = None
+    k: Optional[float] = None
+    omega: Optional[float] = None
+    epsilon: Optional[float] = None
+    # wall rotating about an axis (absolute frame): {"omega": rad/s, "origin": [x, y, z], "axis": [0, 0, 1]}
+    rotation: Optional[dict] = None
 
     def __post_init__(self):
         if self.kind not in KINDS:
@@ -60,11 +68,35 @@ class UnstructuredCase:
     cp: float = 1.0
     buoyancy: List[float] = field(default_factory=lambda: [0.0, 0.0, 0.0])  # rho*beta*g vector
     t_ref: float = 0.0
+    body_force: List[float] = field(default_factory=lambda: [0.0, 0.0, 0.0])  # uniform force per volume
     algorithm: str = "SIMPLEC"  # SIMPLE | SIMPLEC
     relax_u: float = 0.7
     relax_p: float = 0.3
     relax_T: float = 1.0
     scheme: str = "second-order"  # upwind | second-order
+    # pressure force in momentum: "green-gauss" = sum_f p_f S_f (face pressures, as
+    # Fluent does; consistent on triangles) | "least-squares" (cell LS gradient)
+    pressure_gradient: str = "green-gauss"
+    # relative residual reduction of the AMG-PCG pressure-correction solve per outer
+    # iteration (Fluent's AMG default is 0.1; measured: same outer iterations as 1e-3,
+    # 15-50 % less wall time on the cavity and the SST flat plate)
+    pressure_tol: float = 0.1
+    # turbulence: laminar | k-omega-sst | k-epsilon-realizable
+    turbulence: str = "laminar"
+    turb_intensity: float = 0.05  # inlet default (Fluent: 5 %)
+    turb_viscosity_ratio: float = 10.0  # inlet default (Fluent: 10)
+    turb_reference_velocity: Optional[float] = None  # for domains without inlets (periodic)
+    turb_init: Optional[Dict[str, float]] = None  # {"k": .., "omega"|"epsilon": ..}
+    # under-relaxation of k and omega/epsilon (None: model default, SST 0.8, k-epsilon 0.5;
+    # the segregated k-epsilon iteration measured unstable at 0.8 on wall-function meshes)
+    relax_k: Optional[float] = None
+    relax_w: Optional[float] = None
+    relax_mut: float = 1.0  # turbulent viscosity under-relaxation
+    turb_scheme: str = "upwind"  # upwind | second-order
+    # moving reference frames: {cell zone name: {"omega": rad/s, "origin": [..], "axis": [0, 0, 1]}}
+    mrf: Dict[str, dict] = field(default_factory=dict)
+    # solid cell zones for conjugate heat transfer: {zone name: {"conductivity": k, "source": q'''}}
+    solids: Dict[str, dict] = field(default_factory=dict)
     max_iter: int = 2000
     tol: float = 1e-5
     init_velocity: List[float] = field(default_factory=lambda: [0.0, 0.0, 0.0])
@@ -80,6 +112,12 @@ class UnstructuredCase:
         self.algorithm = self.algorithm.upper()
         if self.algorithm == "SIMPLEC" and self.relax_p == 0.3:
             self.relax_p = 1.0  # SIMPLEC needs no pressure under-relaxation
+        from .turbulence import MODELS
+
+        if self.turbulence not in MODELS:
+            raise ValueError(f"turbulence must be one of {MODELS}")
+        if self.pressure_gradient not in ("green-gauss", "least-squares"):
+            raise ValueError("pressure_gradient must be 'green-gauss' or 'least-squares'")
 
     def to_dict(self) -> dict:
         return asdict(self)

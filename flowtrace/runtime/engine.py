@@ -180,7 +180,7 @@ class Job:
 
     def _run_structured(self):
         from ..hardware.planner import plan_structured
-        from ..structured.sequencing import coarse_case, fmg_factors, prolong
+        from ..structured.sequencing import coarse_case, prolong
         from ..structured.solver import MACSolver
 
         case = self._structured_case()
@@ -343,7 +343,7 @@ class Job:
     def _run_unstructured(self, mesh=None, ucase=None):
         from ..hardware.memory import estimate_unstructured, fmt_bytes
         from ..unstructured.case import UnstructuredCase, default_boundaries
-        from ..unstructured.simple import SimpleSolver
+        from ..unstructured.conjugate import make_solver
 
         if mesh is None:
             mesh = self.meshes.get(self.spec.get("mesh_id"))
@@ -369,7 +369,7 @@ class Job:
                 be = get_backend("numba" if "numba" in _avail() else "numpy")
             else:
                 raise MemoryError(" ".join(est.advice))
-        solver = SimpleSolver(mesh, ucase, backend=be)
+        solver = make_solver(mesh, ucase, backend=be)
         self.solver = solver
         desc = solver.describe()
         plan = {
@@ -437,7 +437,8 @@ class Job:
             mesh = s.mesh
             pts = s.cell_centres()
             f = s.fields()
-            fields = {k: v for k, v in f.items() if k in ("x-velocity", "y-velocity", "z-velocity", "pressure", "temperature")}
+            fields = {k: v for k, v in f.items() if k in ("x-velocity", "y-velocity", "z-velocity", "pressure", "temperature",
+                                                          "turb-kinetic-energy", "specific-diss-rate", "turb-diss-rate")}
             bnd = {k: _jsonable(v.__dict__) for k, v in s.zone_specs.items()}
             energy = s.energy
             nu = s.case.viscosity / s.case.density

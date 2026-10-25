@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import numpy as np
 import scipy.sparse as sp
-import scipy.sparse.linalg as spla
 
 try:  # optional JIT for the aggregation loop
     from numba import njit

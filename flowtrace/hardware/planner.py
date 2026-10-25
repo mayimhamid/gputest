@@ -9,11 +9,9 @@ the UI can show the reasoning.
 
 from __future__ import annotations
 
-import time
 from dataclasses import asdict, dataclass, field
 from typing import Dict, List, Optional
 
-import numpy as np
 
 from .backend import BackendUnavailable, available_backends, get_backend
 from .memory import estimate_structured, fmt_bytes
@@ -54,14 +52,20 @@ def _candidates(case_backend: str) -> List[str]:
     return avail
 
 
-def _time_solver(solver, steps: int) -> float:
+def _time_solver(solver, steps: int, warmup: int = 5) -> float:
+    """Best of two timed blocks after a warm-up (GPU kernels are compiled on first use
+    and clocks ramp up; measured on an RTX 4060 Laptop GPU, 2 warm-up steps overstated
+    the CuPy time per step by up to 3x)."""
     be = solver.be
+    for _ in range(warmup if be.is_gpu else 2):
+        solver.step()
+    best = float("inf")
     for _ in range(2):
-        solver.step()
-    t0 = be.timer()
-    for _ in range(steps):
-        solver.step()
-    return (be.timer() - t0) / steps
+        t0 = be.timer()
+        for _ in range(steps):
+            solver.step()
+        best = min(best, (be.timer() - t0) / steps)
+    return best
 
 
 def plan_structured(case, autotune: bool = True, steps: Optional[int] = None,
@@ -148,7 +152,8 @@ def plan_structured(case, autotune: bool = True, steps: Optional[int] = None,
                                          "FMG grid sequencing " + " -> ".join(f"1/{f}" for f in plan.fmg) + " -> 1",
                                          "coarse grids converge 16x/4x cheaper and seed the fine grid"))
     if be.is_gpu and gpu is not None:
-        tc = ("FP64 Tensor-Core GEMMs (cuBLAS DMMA) in the dense transforms" if gpu.is_datacenter_fp64 and "eig" in desc["pressure_detail"]
+        dmma = gpu.is_datacenter_fp64 and "eig" in desc["pressure_detail"]
+        tc = ("FP64 Tensor-Core GEMMs (cuBLAS DMMA) in the dense transforms" if dmma
               else "not used: FFT transforms beat GEMM here, and TF32 would degrade the pressure solve")
         plan.placements.append(Placement("Tensor Cores", dev_label, tc, "accuracy first, then speed"))
     plan.placements.append(Placement("RT cores / OptiX", "-", "not used",

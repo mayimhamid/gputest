@@ -67,6 +67,12 @@ class MACSolver:
         self.per_y = case.bottom.kind == "periodic"
         self.energy = case.energy
         self.use_jit = bool(self.be.jit) and _k.HAVE_NUMBA
+        self.use_cuda = False
+        if self.be.is_gpu:
+            from . import cuda_kernels as _ck
+
+            self.use_cuda = _ck.available()
+            self._ck = _ck
         self.scheme_code = _k.SCHEME_CODES[case.scheme]
         self.timers: Dict[str, float] = defaultdict(float)
         self.history: List[dict] = []
@@ -74,6 +80,7 @@ class MACSolver:
         self._res_norm: Dict[str, float] = {}
         self._res_count = 0
         self.poisson_iters = 0
+        self.sources = {"u": None, "v": None, "T": None}
 
         dt_ = self.dtype
         self.U = xp.zeros((nx + 1 + 2 * G, ny + 2 * G), dtype=dt_)
@@ -93,6 +100,26 @@ class MACSolver:
         self._build_helmholtz()
         self._build_poisson(poisson or case.poisson)
         self._initialise()
+
+    def set_sources(self, su=None, sv=None, sT=None) -> None:
+        """Steady volumetric source terms (per unit volume, momentum/energy equation units).
+
+        ``su``: (nx+1, ny) on the x-faces, ``sv``: (nx, ny+1) on the y-faces,
+        ``sT``: (nx, ny) at cell centres. Used for manufactured-solution
+        verification and for user body forces that vary in space.
+        """
+        xp, dt_ = self.xp, self.dtype
+        for key, arr, shape in (("u", su, (self.nx + 1, self.ny)), ("v", sv, (self.nx, self.ny + 1)),
+                                ("T", sT, (self.nx, self.ny))):
+            if arr is None:
+                self.sources[key] = None
+                continue
+            a = np.asarray(arr, dtype=np.float64)
+            if a.shape != shape:
+                raise ValueError(f"source {key!r} must have shape {shape}, got {a.shape}")
+            if key == "T" and not self.energy:
+                raise ValueError("energy source given but the energy equation is off")
+            self.sources[key] = xp.asarray(a, dtype=dt_)
 
     # ------------------------------------------------------------------
     # Geometry, masks and boundary data
@@ -588,6 +615,10 @@ class MACSolver:
 
     def _conv_u(self):
         U, V, nx, ny = self.U, self.V, self.nx, self.ny
+        if self.use_cuda:
+            bm, bv = self._vel_patch("bottom")
+            tm, tv = self._vel_patch("top")
+            return self._ck.conv_u(U, V, nx, ny, self.dx, self.dy, self.scheme_code, bm, bv, tm, tv)
         if self.use_jit:
             out = np.empty((nx + 1, ny), dtype=self.dtype)
             bm, bv = self._vel_patch("bottom")
@@ -611,6 +642,10 @@ class MACSolver:
 
     def _conv_v(self):
         U, V, nx, ny = self.U, self.V, self.nx, self.ny
+        if self.use_cuda:
+            lm, lv = self._vel_patch("left")
+            rm, rv = self._vel_patch("right")
+            return self._ck.conv_v(U, V, nx, ny, self.dx, self.dy, self.scheme_code, lm, lv, rm, rv)
         if self.use_jit:
             out = np.empty((nx, ny + 1), dtype=self.dtype)
             lm, lv = self._vel_patch("left")
@@ -642,13 +677,16 @@ class MACSolver:
 
     def _conv_T(self):
         U, V, T, nx, ny = self.U, self.V, self.T, self.nx, self.ny
-        if self.use_jit:
-            out = np.empty((nx, ny), dtype=self.dtype)
+        if self.use_jit or self.use_cuda:
             pm = [self._scalar_patch(sd) for sd in ("left", "right", "bottom", "top")]
             if self.per_x:
                 pm[0] = pm[1] = (0, 0.0)
             if self.per_y:
                 pm[2] = pm[3] = (0, 0.0)
+            if self.use_cuda:
+                return self._ck.conv_T(U, V, T, nx, ny, self.dx, self.dy, self.scheme_code,
+                                       [m for m, _ in pm], [v for _, v in pm])
+            out = np.empty((nx, ny), dtype=self.dtype)
             modes = np.array([m for m, _ in pm], dtype=np.int64)
             vals = np.array([v for _, v in pm], dtype=np.float64)
             _k.conv_T_nb(U, V, T, out, nx, ny, self.dx, self.dy, self.scheme_code, modes, vals)
@@ -677,6 +715,8 @@ class MACSolver:
 
     def _lap(self, A, nxa, nya):
         """5-point Laplacian on the interior block [G:G+nxa, G:G+nya] of a ghosted array."""
+        if self.use_cuda:
+            return self._ck.lap(A, nxa, nya, self.dx, self.dy)
         if self.use_jit:
             out = np.empty((nxa, nya), dtype=self.dtype)
             _k.lap_nb(A, out, nxa, nya, self.dx, self.dy)
@@ -766,10 +806,17 @@ class MACSolver:
         rate = umax / self.dx + vmax / self.dy
         ref_rate = c.u_ref * (1.0 / self.dx + 1.0 / self.dy)
         dt = c.cfl / max(rate, 0.5 * ref_rate)
+        inv_h2 = 1.0 / self.dx ** 2 + 1.0 / self.dy ** 2
+        diff = max(c.nu, c.kappa if self.energy else 0.0)
         if not self.implicit:
-            inv_h2 = 1.0 / self.dx ** 2 + 1.0 / self.dy ** 2
-            diff = max(c.nu, c.kappa if self.energy else 0.0)
             dt = min(dt, DIFF_LIMIT_AB2 / (diff * inv_h2))
+        if c.scheme != "central":
+            # AB2 is stable for real eigenvalues down to dt*lambda = -1. Upwind-biased
+            # convection (|Re lambda| <= 2u/h) and explicit diffusion (4 nu / h^2) add
+            # up, so the separate limits above are not enough (measured: a channel at
+            # CFL 0.5 + explicit diffusion oscillates forever near the outlet).
+            eig = 2.0 * max(rate, 0.5 * ref_rate) + (4.0 * diff * inv_h2 if not self.implicit else 0.0)
+            dt = min(dt, 0.9 / eig)
         dt = min(dt, c.dt_max)
         if self.dt_prev is not None:
             dt = min(dt, 1.2 * self.dt_prev)
@@ -817,7 +864,7 @@ class MACSolver:
         """Advance one time step; returns dt (0 when the run is already finished)."""
         if self.finished:
             return 0.0
-        c, xp = self.case, self.xp
+        c = self.case
         nx, ny = self.nx, self.ny
         tm = self.timers
         t0 = time.perf_counter()
@@ -869,6 +916,12 @@ class MACSolver:
                 NT = NT - c.kappa * self._lap(self.T, nx, ny)
                 RT = -ab2(NT, self.NT_old)
                 self.NT_old = NT
+            if self.sources["T"] is not None:
+                RT = RT + self.sources["T"]
+        if self.sources["u"] is not None:
+            Ru = Ru + self.sources["u"]
+        if self.sources["v"] is not None:
+            Rv = Rv + self.sources["v"]
         t2 = time.perf_counter()
         tm["explicit"] += t2 - t1
 
@@ -965,10 +1018,16 @@ class MACSolver:
             return None
         T, nx, ny = self.T, self.nx, self.ny
         if side in ("left", "right"):
-            t0, t1 = (T[G, G:G + ny], T[G + 1, G:G + ny]) if side == "left" else (T[G + nx - 1, G:G + ny], T[G + nx - 2, G:G + ny])
+            if side == "left":
+                t0, t1 = T[G, G:G + ny], T[G + 1, G:G + ny]
+            else:
+                t0, t1 = T[G + nx - 1, G:G + ny], T[G + nx - 2, G:G + ny]
             h = self.dx
         else:
-            t0, t1 = (T[G:G + nx, G], T[G:G + nx, G + 1]) if side == "bottom" else (T[G:G + nx, G + ny - 1], T[G:G + nx, G + ny - 2])
+            if side == "bottom":
+                t0, t1 = T[G:G + nx, G], T[G:G + nx, G + 1]
+            else:
+                t0, t1 = T[G:G + nx, G + ny - 1], T[G:G + nx, G + ny - 2]
             h = self.dy
         # second-order one-sided wall gradient, magnitude of the wall heat flux
         grad = (-8.0 * s.value + 9.0 * t0 - t1) / (3.0 * h)
@@ -978,7 +1037,7 @@ class MACSolver:
     def _delta_T(self):
         vals = [s.value for s in self.sides.values() if s.kind == "wall" and s.thermal == "temperature"]
         vals += [ob.value for ob in self.case.obstacles if ob.thermal == "temperature"]
-        return (max(vals) - min(vals)) if len(vals) >= 2 else 1.0
+        return (max(vals) - min(vals)) if len(vals) >= 2 and max(vals) > min(vals) else 1.0
 
     def sample_probes(self) -> list:
         out = []
@@ -1002,7 +1061,7 @@ class MACSolver:
 
     def vorticity(self):
         """Vorticity at cell centres (average of the four corner values)."""
-        xp, nx, ny = self.xp, self.nx, self.ny
+        nx, ny = self.nx, self.ny
         self._fill_velocity()
         self._apply_obstacles()
         # corners (i, j) for i in 0..nx, j in 0..ny

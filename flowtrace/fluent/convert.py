@@ -25,15 +25,27 @@ def structured_mesh(case, solid: Optional[np.ndarray] = None) -> UnstructuredMes
     from their FlowTrace kinds; faces between fluid and obstacle cells form a
     wall zone named 'obstacle'. Fluid cells keep the (i, j) order (i-major).
     """
-    nx, ny = case.nx, case.ny
-    dx, dy = case.dx, case.dy
+    types = tuple(STRUCTURED_TO_FLUENT[getattr(case, s).kind] for s in ("left", "right", "bottom", "top"))
+    return masked_block_mesh(np.arange(case.nx + 1) * case.dx, np.arange(case.ny + 1) * case.dy, solid,
+                             types=types, name=case.name)
+
+
+def masked_block_mesh(xs, ys, solid: Optional[np.ndarray] = None,
+                      names=("left", "right", "bottom", "top"), types=("wall", "wall", "wall", "wall"),
+                      obstacle=("obstacle", "wall"), name: str = "block") -> UnstructuredMesh:
+    """Quad mesh on the (graded) node lines ``xs`` x ``ys`` minus the cells marked ``solid``.
+
+    Faces between fluid and solid cells form the zone ``obstacle`` (default a
+    wall), e.g. the step of a backward-facing step.
+    """
+    xs = np.asarray(xs, dtype=float)
+    ys = np.asarray(ys, dtype=float)
+    nx, ny = xs.size - 1, ys.size - 1
     if solid is None:
         solid = np.zeros((nx, ny), dtype=bool)
     fluid = ~solid
     cid = -np.ones((nx, ny), dtype=np.int64)
     cid[fluid] = np.arange(int(fluid.sum()))
-    xs = np.arange(nx + 1) * dx
-    ys = np.arange(ny + 1) * dy
     X, Y = np.meshgrid(xs, ys, indexing="ij")
     nodes_all = np.stack([X.ravel(), Y.ravel()], axis=1)
 
@@ -69,30 +81,36 @@ def structured_mesh(case, solid: Optional[np.ndarray] = None) -> UnstructuredMes
     nc = int(fluid.sum())
     zones = {2: Zone(2, "fluid", "fluid", "cell", 0, nc - 1),
              ZINT: Zone(ZINT, "interior-fluid", "interior", "face")}
-    for zid, side in ((ZL, "left"), (ZR, "right"), (ZB, "bottom"), (ZT, "top")):
-        zones[zid] = Zone(zid, side, STRUCTURED_TO_FLUENT[getattr(case, side).kind], "face")
+    for zid, side, typ in zip((ZL, ZR, ZB, ZT), names, types):
+        zones[zid] = Zone(zid, side, typ, "face")
     if np.any(fz == ZOB):
-        zones[ZOB] = Zone(ZOB, "obstacle", "wall", "face")
+        zones[ZOB] = Zone(ZOB, obstacle[0], obstacle[1], "face")
     present = set(np.unique(fz).tolist())
     zones = {k: z for k, z in zones.items() if z.kind == "cell" or k in present}
     m = UnstructuredMesh(dim=2, nodes=nodes, face_ptr=np.arange(0, 2 * fn.shape[0] + 1, 2, dtype=np.int64),
                          face_nodes=fn.ravel(), owner=owner, neighbour=neigh, face_zone=fz, n_cells=nc,
-                         cell_zone=np.full(nc, 2, dtype=np.int64), zones=zones, name=case.name)
+                         cell_zone=np.full(nc, 2, dtype=np.int64), zones=zones, name=name)
     return sort_faces_by_zone(m)
 
 
 def _emit(faces, own, nei, zone, n0, n1, lo_c, hi_c, at_lo, at_hi, z_lo, z_hi, z_int, z_ob):
     # interior fluid-fluid
     m = (lo_c >= 0) & (hi_c >= 0)
-    faces.append(np.stack([n0[m], n1[m]], axis=1)); own.append(lo_c[m]); nei.append(hi_c[m])
+    faces.append(np.stack([n0[m], n1[m]], axis=1))
+    own.append(lo_c[m])
+    nei.append(hi_c[m])
     zone.append(np.full(m.sum(), z_int))
     # boundary faces with the fluid cell on the high side (normal must point to -axis)
     m = (hi_c >= 0) & (lo_c < 0)
-    faces.append(np.stack([n1[m], n0[m]], axis=1)); own.append(hi_c[m]); nei.append(np.full(m.sum(), -1))
+    faces.append(np.stack([n1[m], n0[m]], axis=1))
+    own.append(hi_c[m])
+    nei.append(np.full(m.sum(), -1))
     zone.append(np.where(at_lo[m], z_lo, z_ob))
     # boundary faces with the fluid cell on the low side
     m = (lo_c >= 0) & (hi_c < 0)
-    faces.append(np.stack([n0[m], n1[m]], axis=1)); own.append(lo_c[m]); nei.append(np.full(m.sum(), -1))
+    faces.append(np.stack([n0[m], n1[m]], axis=1))
+    own.append(lo_c[m])
+    nei.append(np.full(m.sum(), -1))
     zone.append(np.where(at_hi[m], z_hi, z_ob))
 
 

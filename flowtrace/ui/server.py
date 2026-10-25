@@ -25,7 +25,6 @@ import threading
 import time
 import uuid
 import zipfile
-from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse
 
