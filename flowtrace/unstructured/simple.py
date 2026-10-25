@@ -75,6 +75,13 @@ class SimpleSolver:
         self.last_linear = {}
         self._gp = self._gU = self._gT = None  # lagged gradients for boundary reconstruction
         self.external_energy = False  # True when a conjugate (fluid+solid) solver owns the energy equation
+        # SIMPLEC needs no pressure under-relaxation on orthogonal meshes; on non-orthogonal ones
+        # the neglected skewed part of the p' Laplacian accumulates without it (measured: warped
+        # 96^2/128^2 meshes diverged at 1.0 and converge at 0.8, which costs 2-6 % iterations)
+        if case.relax_p is not None:
+            self.relax_p = float(case.relax_p)
+        else:
+            self.relax_p = 1.0 if fv.non_orthogonality_deg <= 5.0 else 0.8
         self._build_boundaries()
         U0 = np.zeros((self.nc, dim))
         iv = list(case.init_velocity) + [0.0] * 3
@@ -345,11 +352,12 @@ class SimpleSolver:
         U, p = self.U, self.p
         ub = self._velocity_bvals(U, self._gU)
         pb = self._pressure_bvals(p, self._gp)
-        gp = fv.gradient(p, pb)
+        gp_ls = fv.gradient(p, pb)
+        gp = gp_ls
         if c.pressure_gradient == "green-gauss":
             # face-pressure force: the discrete adjoint of the face-flux divergence,
             # which keeps the saddle-point system consistent on triangles
-            gp = fv.gradient_gg(p, pb, gp)
+            gp = fv.gradient_gg(p, pb, gp_ls)
         gU = [fv.gradient(U[:, k], ub[:, k]) for k in range(dim)]
         self._gp, self._gU = gp, gU
         t1 = time.perf_counter()
@@ -451,7 +459,7 @@ class SimpleSolver:
         # ---------------- corrections ----------------
         self.F = Fst + cf * (pp[P] - pp[N])
         self.Fb = Fbst + cb * pp[Pb]
-        self.p = p + c.relax_p * pp
+        self.p = p + self.relax_p * pp
         if self.singular_p:
             self.p = self.p - self.p.mean()
         ppb = (1.0 - self.m_pres) * pp[Pb]
@@ -539,6 +547,7 @@ class SimpleSolver:
             "backend": self.be.name, "device": self.be.device, "precision": str(self.dtype),
             "cells": self.nc, "faces": self.mesh.n_faces, "dim": self.dim,
             "convection": self.case.scheme,
+            "relax_p": self.relax_p,
             "pressure_solver": "AMG-PCG (" + ("pyamg" if amg is not None and not hasattr(amg, "levels")
                                                else "FlowTrace SA-AMG") + ")",
             "max_non_orthogonality_deg": round(self.fv.non_orthogonality_deg, 2),

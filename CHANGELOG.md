@@ -12,7 +12,7 @@ Until 1.0.0, minor versions may still change the Python API; the CLI stays backw
   number in the README is produced by it.
 - Method of Manufactured Solutions for both solvers (`flowtrace.validation.mms`). Observed
   orders: MAC 2.0 for u, v, p, T; SIMPLEC 1.9–2.0 for velocity/temperature on warped quads and
-  triangles, 1.4 for pressure on triangles.
+  triangles; pressure 2.0 on quads and 1.2–1.5 on triangles.
 - Grid Convergence Index (Celik et al. 2008) for the natural-convection Nusselt number and the
   cavity centreline minimum.
 - Warm-start study (`flowtrace warmstart-study`). It measures the iteration savings of a FlowTrace
@@ -59,6 +59,11 @@ Until 1.0.0, minor versions may still change the Python API; the CLI stays backw
   now converges in 760 steps.
 - Continuity residual normalisation floor, so periodic and warm-started runs report
   convergence correctly.
+- SIMPLEC pressure relaxation is now automatic: 1.0 on orthogonal meshes, 0.8 above 5° of
+  non-orthogonality. At 1.0, finely resolved warped meshes diverged because the pressure
+  correction neglects the non-orthogonal face terms.
+- BiCGSTAB stops when the initial residual is already at round-off level. Before, a converged
+  outer iteration could make the recurrence coefficients overflow.
 
 ### Performance
 - Profiled before porting: on SIMPLEC, 74 % of an iteration was the pressure-correction AMG-PCG.

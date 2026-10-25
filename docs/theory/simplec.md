@@ -48,8 +48,16 @@ Both pressure terms are projected on the same orthogonal direction \(\alpha\math
 pressure correction \(\sum_f \rho\,\overline d_f\alpha_f(p'_P-p'_N) = -\dot m_P\) is solved by
 AMG-preconditioned CG. pyamg is used on the CPU, and FlowTrace's smoothed-aggregation AMG,
 applied with cuSPARSE, on the GPU. The inner tolerance defaults to 0.1, Fluent's AMG default;
-this was measured to leave outer iterations unchanged and save 15–50 % of the wall time. SIMPLEC
-needs no pressure under-relaxation.
+this was measured to leave outer iterations unchanged and save 15–50 % of the wall time.
+
+**Pressure under-relaxation.** SIMPLE uses 0.3. SIMPLEC needs none on orthogonal meshes (1.0).
+The pressure-correction equation keeps only the orthogonal part \(\alpha\) of each face, though,
+and on non-orthogonal meshes the neglected part accumulates. On smoothly warped 96² and 128²
+meshes (24.6° non-orthogonality) SIMPLEC at 1.0 was measured to diverge, while 0.8 converged.
+The default is therefore automatic: 1.0 when the maximum non-orthogonality is ≤ 5°, otherwise
+0.8. This costs 2–6 % more iterations where 1.0 would also have worked, and it follows Fluent's
+own advice to use skewness correction or a more conservative factor on skewed meshes. An
+explicit `relax_p` always takes precedence.
 
 ## Residuals and convergence
 
@@ -69,5 +77,6 @@ sum to zero, which is checked by the benchmarks.
 ## Verification
 
 Manufactured solution on smoothly warped quads and triangles (`mms_simplec_quads`,
-`mms_simplec_tri`): observed order about 2 for velocity and temperature, 1.4–1.9 for pressure.
+`mms_simplec_tri`): observed order about 2 for velocity and temperature; pressure 2.0 on quads and
+between first and second order (1.2–1.5) on triangles.
 Global mass and energy balances hold to ~1e-12.

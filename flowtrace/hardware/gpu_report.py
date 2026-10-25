@@ -154,8 +154,10 @@ def run_gpu_report(out_dir: str = "benchmarks/results", sizes=(64, 128, 256, 512
     host = (platform.node() or "host").replace(" ", "_")
     with open(os.path.join(out_dir, f"gpu_{host}.json"), "w", encoding="utf-8") as fh:
         json.dump(data, fh, indent=1)
-    with open(os.path.join(out_dir, f"gpu_{host}.md"), "w", encoding="utf-8") as fh:
-        fh.write(render_markdown(data))
+    md = render_markdown(data)
+    for name in (f"gpu_{host}.md", "gpu_latest.md"):  # host-specific log + a stable name for the docs
+        with open(os.path.join(out_dir, name), "w", encoding="utf-8") as fh:
+            fh.write(md)
     return data
 
 

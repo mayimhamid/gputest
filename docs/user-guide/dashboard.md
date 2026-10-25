@@ -7,9 +7,11 @@
 
 * **Case** – built-in cases, or drag and drop a Fluent mesh (`.msh`, `.cas`, `.cas.h5`). Zones are
   listed with their Fluent types and mapped to editable boundary conditions. The mesh quality
-  summary is shown on upload.
-* **Solver** – transient projection or steady SIMPLEC, schemes, turbulence model,
-  backend/precision (or *Auto*: measure and choose), checkpoints, memory estimate.
+  summary is shown on upload, and solid cell zones get conductivity and heat-source fields
+  (conjugate heat transfer). *Material & models* sets density, viscosity, the turbulence model
+  and the energy equation.
+* **Solver** – transient projection or steady SIMPLEC, schemes, relaxation, backend/precision
+  (or *Auto*: measure and choose), checkpoints, memory estimate.
 * **Hardware** – everything the probe found, plus one-click benchmarks.
 * **Fluent** – download the hand-off package (`.msh`, `.ip`, `.jou`, PyFluent `.py`, `.csv`).
 * **Viewport** – contours, streamlines, vectors, mesh edges and a hover read-out. The right column

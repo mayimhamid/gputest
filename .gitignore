@@ -8,3 +8,7 @@ flowtrace_runs/
 *.npz
 .venv/
 venv/
+.cache/
+.claude/
+site/
+.flowtrace_installed

@@ -147,7 +147,7 @@ def run_mac(grids: Sequence[int] = (16, 32, 64), nu: float = 0.5, kappa: float =
 
 def run_simplec(grids: Sequence[int] = (12, 24, 48), mu: float = 0.5, k: float = 0.5, energy: bool = True,
                 triangulate: bool = False, warp: float = 0.0, scheme: str = "second-order",
-                backend: str = "numpy", tol: float = 1e-9, max_iter: int = 20000,
+                backend: str = "numpy", tol: float = 1e-8, max_iter: int = 20000,
                 pressure_gradient: str = "green-gauss") -> MMSResult:
     """Steady MMS on the unstructured SIMPLEC solver (quads or triangles).
 

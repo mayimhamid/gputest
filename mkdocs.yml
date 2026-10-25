@@ -1,6 +1,11 @@
 site_name: FlowTrace
 site_description: Hardware-aware CFD solver and warm-start companion for Ansys Fluent (compatible, not affiliated)
 docs_dir: docs
+hooks:
+  - docs/hooks.py
+exclude_docs: |
+  hooks.py
+  tutorials/make_notebooks.py
 strict: true
 
 theme:

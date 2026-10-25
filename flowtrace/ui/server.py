@@ -11,8 +11,12 @@ Endpoints (JSON unless noted):
   POST /api/view              change the displayed field {field}
   GET  /api/state             current job, plan, residual history, log
   GET  /api/events            Server-Sent Events stream (status, plan, residuals, frame, geometry, log)
-  POST /api/mesh              upload a Fluent mesh (raw body, header X-Filename)
+  POST /api/mesh              upload a Fluent mesh (.msh/.cas/.cas.h5/.msh.h5; raw body, header X-Filename)
   GET  /api/export/<kind>     download msh | ip | jou | py | csv | zip for the current job
+  GET  /api/projects          saved projects in <workdir>/projects
+  POST /api/projects          save {name, spec, ui} (+ the uploaded mesh and the last result)
+  GET  /api/projects/<name>   open a project (re-registers its mesh)
+  POST /api/report            self-contained HTML report of the current run {image: PNG data URL}
 """
 
 from __future__ import annotations
@@ -21,6 +25,8 @@ import io
 import json
 import mimetypes
 import os
+import re
+import tempfile
 import threading
 import time
 import uuid
@@ -44,6 +50,13 @@ class AppState:
         self.lock = threading.Lock()
         self._profile = None
         self._bench = None
+        self.mesh_files = {}  # mesh id -> (file name, original upload bytes), saved with projects
+
+    @property
+    def project_dir(self) -> str:
+        d = os.path.join(self.workdir, "projects")
+        os.makedirs(d, exist_ok=True)
+        return d
 
     def profile(self):
         from ..hardware.probe import probe_system
@@ -72,7 +85,7 @@ def preset_catalog():
 
 def make_handler(app: AppState):
     class Handler(BaseHTTPRequestHandler):
-        server_version = "FlowTrace/0.1"
+        server_version = "FlowTrace"
 
         def log_message(self, fmt, *args):  # keep the console quiet
             pass
@@ -130,6 +143,10 @@ def make_handler(app: AppState):
                     return self._events()
                 if path.startswith("/api/export/"):
                     return self._export(path.rsplit("/", 1)[-1])
+                if path == "/api/projects":
+                    return self._json({"projects": list_projects(app)})
+                if path.startswith("/api/projects/"):
+                    return self._json(open_project(app, path.rsplit("/", 1)[-1]))
                 if path.startswith("/api/mesh/"):
                     mid = path.rsplit("/", 1)[-1]
                     mesh = app.meshes.get(mid)
@@ -172,6 +189,10 @@ def make_handler(app: AppState):
                     return self._estimate()
                 if path == "/api/mesh":
                     return self._upload_mesh()
+                if path == "/api/projects":
+                    return self._json(save_project(app, self._json_body()))
+                if path == "/api/report":
+                    return self._report()
                 return self._error("not found", 404)
             except (BrokenPipeError, ConnectionResetError):
                 pass
@@ -275,23 +296,21 @@ def make_handler(app: AppState):
             self._json(out)
 
         def _upload_mesh(self):
-            from ..mesh.fluent_msh import read_fluent_mesh
-            from ..mesh.unstructured import compute_geometry
-            from ..unstructured.case import default_boundaries
+            name = os.path.basename(self.headers.get("X-Filename", "mesh.msh"))
+            self._json(register_mesh(app, self._body(), name))
 
-            name = self.headers.get("X-Filename", "mesh.msh")
-            raw = self._body()
-            t0 = time.perf_counter()
-            mesh = read_fluent_mesh(raw, name=os.path.basename(name))
-            geo = compute_geometry(mesh)
-            mid = uuid.uuid4().hex[:8]
-            app.meshes[mid] = mesh
-            info = mesh.summary()
-            info.update({"id": mid, "read_seconds": round(time.perf_counter() - t0, 3),
-                         "volume": geo.total_volume, "repaired_faces": geo.flipped_faces,
-                         "boundaries": {k: v.__dict__ for k, v in default_boundaries(mesh).items()}})
-            app.mesh_info[mid] = info
-            self._json(info)
+        def _report(self):
+            body = self._json_body()
+            job = app.job
+            if job is None or job.solver is None:
+                return self._error("run a case first", 409)
+            data = run_report_html(app, job, body.get("image")).encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(data)))
+            self.send_header("Content-Disposition", f'attachment; filename="flowtrace_report_{job.id}.html"')
+            self.end_headers()
+            self.wfile.write(data)
 
         def _export(self, kind):
             job = app.job
@@ -317,6 +336,212 @@ def make_handler(app: AppState):
             return self._file(files[kind], download_name=os.path.basename(files[kind]))
 
     return Handler
+
+
+# --------------------------------------------------------------------------
+# meshes, projects and reports (module level so the tests can use them directly)
+# --------------------------------------------------------------------------
+
+HDF5_MAGIC = b"\x89HDF\r\n\x1a\n"
+
+
+def register_mesh(app: AppState, raw: bytes, name: str) -> dict:
+    """Read an uploaded mesh (.msh/.cas, gzipped or not, or CFF .cas.h5/.msh.h5) and summarise it."""
+    from ..mesh.fluent_msh import read_fluent_mesh
+    from ..mesh.quality import mesh_quality
+    from ..unstructured.case import default_boundaries
+
+    t0 = time.perf_counter()
+    if raw[:8] == HDF5_MAGIC:
+        from ..mesh.fluent_h5 import read_case_h5
+
+        fd, tmp = tempfile.mkstemp(suffix=".h5")
+        try:
+            with os.fdopen(fd, "wb") as fh:
+                fh.write(raw)
+            mesh = read_case_h5(tmp, name=name)
+        finally:
+            os.unlink(tmp)
+    else:
+        mesh = read_fluent_mesh(raw, name=name)
+    q = mesh_quality(mesh)
+    mid = uuid.uuid4().hex[:8]
+    app.meshes[mid] = mesh
+    app.mesh_files[mid] = (name, raw)
+    info = mesh.summary()
+    info.update({"id": mid, "read_seconds": round(time.perf_counter() - t0, 3),
+                 "volume": q.total_volume, "repaired_faces": q.left_handed_faces_repaired,
+                 "boundaries": {k: v.__dict__ for k, v in default_boundaries(mesh).items()},
+                 "solid_zones": [z.name for z in mesh.cell_zones() if z.type == "solid"],
+                 "quality": {"min_orthogonal_quality": q.min_orthogonal_quality, "max_skewness": q.max_skewness,
+                             "max_aspect_ratio": q.max_aspect_ratio,
+                             "max_non_orthogonality_deg": q.max_non_orthogonality_deg,
+                             "warnings": q.warnings, "ok": q.ok}})
+    app.mesh_info[mid] = info
+    return info
+
+
+def _safe_name(name: str) -> str:
+    s = re.sub(r"[^A-Za-z0-9_.\- ]", "_", str(name)).strip().strip(".")
+    if not s:
+        raise ValueError("project name is empty")
+    return s[:80]
+
+
+def list_projects(app: AppState) -> list:
+    out = []
+    for fn in sorted(os.listdir(app.project_dir)):
+        if not fn.endswith(".json"):
+            continue
+        try:
+            with open(os.path.join(app.project_dir, fn), encoding="utf-8") as fh:
+                d = json.load(fh)
+            out.append({"name": d.get("name", fn[:-5]), "saved": d.get("saved"), "kind": d.get("spec", {}).get("kind"),
+                        "title": d.get("title", ""), "has_result": bool(d.get("result"))})
+        except (OSError, ValueError):
+            continue
+    return out
+
+
+def save_project(app: AppState, body: dict) -> dict:
+    name = _safe_name(body.get("name", ""))
+    spec = body.get("spec") or {}
+    proj = {"name": name, "saved": time.strftime("%Y-%m-%d %H:%M:%S"), "flowtrace": _version(),
+            "title": body.get("title", ""), "spec": spec, "ui": body.get("ui") or {}}
+    mid = spec.get("mesh_id")
+    if spec.get("kind") == "unstructured" and mid in app.mesh_files:
+        fname, raw = app.mesh_files[mid]
+        ext = ".cas.h5" if raw[:8] == HDF5_MAGIC else (os.path.splitext(fname)[1] or ".msh")
+        mesh_file = name + "_mesh" + ext
+        with open(os.path.join(app.project_dir, mesh_file), "wb") as fh:
+            fh.write(raw)
+        proj["mesh_file"] = mesh_file
+        proj["mesh_name"] = fname
+    job = app.job
+
+    def same(a, b):  # the displayed field is a view setting, not part of the case
+        return {k: v for k, v in (a or {}).items() if k != "field"} == {k: v for k, v in (b or {}).items() if k != "field"}
+
+    if job is not None and not job.running and job.result and same(job.spec, spec):
+        proj["result"] = _jsonable(job.result)
+    path = os.path.join(app.project_dir, name + ".json")
+    with open(path, "w", encoding="utf-8") as fh:
+        json.dump(_jsonable(proj), fh, indent=1)
+    return {"ok": True, "name": name, "path": path}
+
+
+def open_project(app: AppState, name: str) -> dict:
+    from urllib.parse import unquote
+
+    name = _safe_name(unquote(name))
+    path = os.path.join(app.project_dir, name + ".json")
+    if not os.path.isfile(path):
+        raise FileNotFoundError(f"no project named {name!r}")
+    with open(path, encoding="utf-8") as fh:
+        proj = json.load(fh)
+    out = {"project": proj}
+    if proj.get("mesh_file"):
+        with open(os.path.join(app.project_dir, proj["mesh_file"]), "rb") as fh:
+            info = register_mesh(app, fh.read(), proj.get("mesh_name", proj["mesh_file"]))
+        proj["spec"]["mesh_id"] = info["id"]
+        out["mesh"] = info
+    return out
+
+
+def _version() -> str:
+    from .. import __version__
+
+    return __version__
+
+
+def _svg_residuals(history: list, width: int = 640, height: int = 260) -> str:
+    """Residual history as an inline SVG (log scale); no plotting library needed."""
+    import math
+
+    if not history:
+        return "<p>No residual history.</p>"
+    keys = list(history[-1].get("scaled", {}).keys())
+    pts = {k: [(i, ev.get("scaled", {}).get(k)) for i, ev in enumerate(history)] for k in keys}
+    vals = [math.log10(v) for k in keys for _, v in pts[k] if v and v > 0]
+    if not vals:
+        return "<p>No residual history.</p>"
+    lo, hi = math.floor(min(vals)), math.ceil(max(vals))
+    hi = max(hi, lo + 1)
+    n = max(len(history) - 1, 1)
+    L, R, T, B = 48, 10, 10, 26
+    X = lambda i: L + (width - L - R) * i / n  # noqa: E731
+    Y = lambda lv: T + (height - T - B) * (hi - lv) / (hi - lo)  # noqa: E731
+    colours = ["#1f77b4", "#d62728", "#2ca02c", "#9467bd", "#ff7f0e", "#8c564b", "#e377c2"]
+    out = [f'<svg viewBox="0 0 {width} {height}" role="img" aria-label="Residual history" '
+           f'style="max-width:100%;background:#fff;border:1px solid #ddd;border-radius:6px">']
+    for e in range(lo, hi + 1):
+        y = Y(e)
+        out.append(f'<line x1="{L}" x2="{width - R}" y1="{y:.1f}" y2="{y:.1f}" stroke="#eee"/>'
+                   f'<text x="4" y="{y + 4:.1f}" font-size="10" fill="#555">1e{e}</text>')
+    for c, k in enumerate(keys):
+        d = " ".join(f"{X(i):.1f},{Y(math.log10(v)):.1f}" for i, v in pts[k] if v and v > 0)
+        col = colours[c % len(colours)]
+        out.append(f'<polyline fill="none" stroke="{col}" stroke-width="1.4" points="{d}"/>')
+        out.append(f'<text x="{L + 8 + 110 * c}" y="{height - 6}" font-size="11" fill="{col}">{k}</text>')
+    out.append("</svg>")
+    return "".join(out)
+
+
+def run_report_html(app: AppState, job, image=None) -> str:
+    """Self-contained HTML report of the current run (opens without FlowTrace)."""
+    import html as H
+
+    esc = lambda x: H.escape(str(x))  # noqa: E731
+    res = _jsonable(job.result or {})
+    plan = job.plan or {}
+    prof = app.profile()
+    parts = []
+
+    def table(d):
+        return "<table>" + "".join(f"<tr><th>{esc(k)}</th><td>{esc(v)}</td></tr>" for k, v in d.items()) + "</table>"
+
+    parts.append(f"<h1>FlowTrace run report</h1><p class='m'>Job {esc(job.id)} &middot; status <b>{esc(job.status)}</b>"
+                 f" &middot; FlowTrace {esc(_version())} &middot; {esc(time.strftime('%Y-%m-%d %H:%M'))}</p>")
+    parts.append("<h2>Machine</h2>" + table({"CPU": prof.cpu_model,
+                                             "GPU": prof.best_gpu.name if prof.best_gpu else "none", "OS": prof.os}))
+    spec = dict(job.spec)
+    spec.pop("field", None)
+    parts.append("<h2>Case</h2><pre>" + esc(json.dumps(_jsonable(spec), indent=1)) + "</pre>")
+    if plan:
+        pl = plan.get("placements", [])
+        parts.append("<h2>Execution plan</h2><p>Backend <b>" + esc(plan.get("backend")) + "</b>, precision "
+                     + esc(plan.get("precision")) + ". Measured ms/step: " + esc(plan.get("measured_ms_per_step") or "-")
+                     + "</p><table><tr><th>Stage</th><th>Device</th><th>Method</th><th>Reason</th></tr>"
+                     + "".join(f"<tr><td>{esc(p.get('stage'))}</td><td>{esc(p.get('device'))}</td>"
+                               f"<td>{esc(p.get('method'))}</td><td>{esc(p.get('reason'))}</td></tr>" for p in pl)
+                     + "</table>")
+    parts.append("<h2>Convergence</h2>" + _svg_residuals(list(app.hub.residuals)))
+    summary = {k: res[k] for k in ("steps", "iterations", "time", "converged") if k in res}
+    if summary:
+        parts.append(table(summary))
+    checks = (res.get("validation") or {}).get("checks") or []
+    if checks:
+        parts.append("<h2>Validation</h2><table><tr><th>Check</th><th>Value</th><th>Reference</th><th>Result</th></tr>"
+                     + "".join(f"<tr><td>{esc(c.get('name'))}</td><td>{esc(c.get('value'))} {esc(c.get('unit', ''))}</td>"
+                               f"<td>{esc(c.get('reference', '-'))}</td><td>{'pass' if c.get('pass') else 'check'}</td></tr>"
+                               for c in checks) + "</table>")
+    if res.get("mass_balance"):
+        mb = res["mass_balance"]
+        parts.append("<h2>Mass balance</h2>" + table({**mb, "net": sum(mb.values())}))
+    if isinstance(image, str) and image.startswith("data:image/png;base64,"):
+        parts.append(f"<h2>Field</h2><img alt='Field snapshot' src='{image}' style='max-width:100%'>")
+    log = [ev.get("msg", "") for ev in list(app.hub.log)[-60:]]
+    parts.append("<h2>Log (last lines)</h2><pre>" + esc("\n".join(log)) + "</pre>")
+    parts.append("<p class='m'>Ansys and Fluent are trademarks of ANSYS, Inc. FlowTrace is an independent project, "
+                 "not affiliated with or endorsed by ANSYS, Inc.</p>")
+    css = ("body{font:14px/1.5 system-ui,Segoe UI,Roboto,sans-serif;max-width:1000px;margin:24px auto;padding:0 16px;"
+           "color:#1d2433;background:#fff}h1{font-size:24px}h2{font-size:17px;margin-top:28px;border-top:1px solid #e3e6ec;"
+           "padding-top:10px}table{border-collapse:collapse;width:100%;font-size:13px}th,td{border-bottom:1px solid #eceff4;"
+           "padding:4px 6px;text-align:left;vertical-align:top}pre{background:#f6f8fb;padding:8px;overflow:auto;"
+           "font-size:12px}.m{color:#5b6475}")
+    return ("<!doctype html><html lang='en'><head><meta charset='utf-8'><title>FlowTrace Run Report</title>"
+            f"<meta name='viewport' content='width=device-width,initial-scale=1'><style>{css}</style></head><body>"
+            + "".join(parts) + "</body></html>")
 
 
 def serve(host: str = "127.0.0.1", port: int = 8765, workdir: str = "flowtrace_runs", open_browser: bool = True):

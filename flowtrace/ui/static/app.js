@@ -16,6 +16,40 @@ const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&l
 function b64f32(s) { const bin = atob(s); const buf = new ArrayBuffer(bin.length); const u8 = new Uint8Array(buf); for (let i = 0; i < bin.length; i++) u8[i] = bin.charCodeAt(i); return new Float32Array(buf); }
 function b64i32(s) { const bin = atob(s); const buf = new ArrayBuffer(bin.length); const u8 = new Uint8Array(buf); for (let i = 0; i < bin.length; i++) u8[i] = bin.charCodeAt(i); return new Int32Array(buf); }
 
+/* ------------------------------------------------------------------ language & theme */
+const store = { get(k) { try { return localStorage.getItem(k); } catch (e) { return null; } },
+  set(k, v) { try { localStorage.setItem(k, v); } catch (e) { /* private mode: not remembered */ } } };
+let LANG = store.get("ft-lang") === "fa" ? "fa" : "en";
+const t = (k) => ((window.FT_I18N || {})[LANG] || {})[k] || ((window.FT_I18N || {}).en || {})[k] || k;
+function applyI18n() {
+  const root = document.documentElement;
+  root.lang = LANG; root.dir = LANG === "fa" ? "rtl" : "ltr";
+  $$("[data-i18n]").forEach((el) => { el.textContent = t(el.dataset.i18n); });
+  $$("[data-i18n-aria]").forEach((el) => el.setAttribute("aria-label", t(el.dataset.i18nAria)));
+  $$("[data-i18n-placeholder]").forEach((el) => el.setAttribute("placeholder", t(el.dataset.i18nPlaceholder)));
+  const lb = $("#langBtn");
+  lb.textContent = LANG === "fa" ? "EN" : "فا";
+  lb.setAttribute("aria-label", t("language"));
+  const pill = $("#statusPill"); if (pill.dataset.status) pill.textContent = statusText(pill.dataset.status, pill.dataset.label);
+  updateThemeButton();
+}
+function setLang(l) { LANG = l; store.set("ft-lang", l); applyI18n(); }
+function statusText(st, label) { return t("st_" + st) + (label && st === "running" ? ` · ${label}` : ""); }
+const THEMES = ["auto", "light", "dark"];
+function currentTheme() { return document.documentElement.dataset.theme || "auto"; }
+function updateThemeButton() {
+  const th = currentTheme(), b = $("#themeBtn");
+  const key = th === "light" ? "themeLight" : th === "dark" ? "themeDark" : "themeAuto";
+  b.setAttribute("aria-label", t(key)); b.title = t(key); b.textContent = th === "light" ? "☀" : th === "dark" ? "☾" : "◐";
+}
+function cycleTheme() {
+  const next = THEMES[(THEMES.indexOf(currentTheme()) + 1) % THEMES.length];
+  if (next === "auto") delete document.documentElement.dataset.theme; else document.documentElement.dataset.theme = next;
+  store.set("ft-theme", next); updateThemeButton(); redrawAll();
+}
+const cssVar = (name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+function redrawAll() { draw(); drawResiduals(); drawMonitor(); }
+
 /* ------------------------------------------------------------------ colormaps */
 const CMAPS = {
   turbo(x) {
@@ -66,16 +100,32 @@ const S = {
 };
 
 /* ------------------------------------------------------------------ UI wiring */
+function selectTab(b, focus) {
+  $$("#tabs button").forEach((x) => {
+    const on = x === b;
+    x.classList.toggle("active", on); x.setAttribute("aria-selected", on ? "true" : "false"); x.tabIndex = on ? 0 : -1;
+  });
+  $$(".tab-body > section").forEach((s) => s.classList.toggle("active", s.dataset.tab === b.dataset.tab));
+  if (focus) b.focus();
+}
 function initTabs() {
-  $$("#tabs button").forEach((b) => b.addEventListener("click", () => {
-    $$("#tabs button").forEach((x) => x.classList.toggle("active", x === b));
-    $$(".tab-body > section").forEach((s) => s.classList.toggle("active", s.dataset.tab === b.dataset.tab));
-  }));
+  const tabs = $$("#tabs button");
+  tabs.forEach((b, i) => {
+    b.addEventListener("click", () => selectTab(b));
+    b.addEventListener("keydown", (e) => {
+      const rtl = document.documentElement.dir === "rtl";
+      let j = null;
+      if (e.key === (rtl ? "ArrowLeft" : "ArrowRight")) j = (i + 1) % tabs.length;
+      else if (e.key === (rtl ? "ArrowRight" : "ArrowLeft")) j = (i - 1 + tabs.length) % tabs.length;
+      else if (e.key === "Home") j = 0; else if (e.key === "End") j = tabs.length - 1;
+      if (j !== null) { e.preventDefault(); selectTab(tabs[j], true); }
+    });
+  });
   $$("#sourceSeg button").forEach((b) => b.addEventListener("click", () => setSource(b.dataset.src)));
 }
 function setSource(src) {
   S.source = src;
-  $$("#sourceSeg button").forEach((x) => x.classList.toggle("active", x.dataset.src === src));
+  $$("#sourceSeg button").forEach((x) => { x.classList.toggle("active", x.dataset.src === src); x.setAttribute("aria-pressed", x.dataset.src === src ? "true" : "false"); });
   $("#structuredCase").classList.toggle("hidden", src !== "structured");
   $("#unstructuredCase").classList.toggle("hidden", src !== "unstructured");
   $("#structSolverCard").classList.toggle("hidden", src !== "structured");
@@ -130,15 +180,13 @@ async function loadSystem() {
     <tr><td>Compute capability</td><td>${esc(x.compute_capability || "?")} · ${x.multiprocessors || "?"} SMs</td></tr>
     <tr><td>Tensor / RT cores</td><td>${x.tensor_cores ? "yes" : "no"} / ${x.rt_cores ? "yes" : "no"}</td></tr>
     <tr><td>FP64 : FP32</td><td>1 : ${Math.round(1 / x.fp64_rate)}</td></tr></table>`).join("")
-    : "No NVIDIA GPU detected. FlowTrace runs on the CPU backends (NumPy, Numba).";
+    : esc(t("noGpu"));
   $("#sysNotes").innerHTML = (p.notes || []).map((n) => `• ${esc(n)}`).join("<br>") || "–";
   const be = $("#backend");
   be.innerHTML = '<option value="auto">Auto (measure & choose)</option>' + sys.backends.map((b) => `<option value="${b}">${b}</option>`).join("");
   if (sys.bench) renderBench(sys.bench);
   const pf = sys.pyfluent;
-  $("#pyfluentBox").innerHTML = pf.available
-    ? `PyFluent ${esc(pf.version)} installed. The exported <span class="mono">run_pyfluent.py</span> launches Fluent, reads the mesh, interpolates the FlowTrace solution and iterates.`
-    : `PyFluent not installed. <span class="mono">pip install ansys-fluent-core</span> (needs a licensed Fluent) to drive Fluent from FlowTrace; the .msh/.ip/.jou files work without it.`;
+  $("#pyfluentBox").textContent = pf.available ? `${t("pyfluentYes")} (PyFluent ${pf.version})` : t("pyfluentNo");
 }
 
 function renderBench(b) {
@@ -163,30 +211,46 @@ async function loadPresets() {
 function initMeshUpload() {
   const dz = $("#dropzone"), fi = $("#meshFile");
   dz.addEventListener("click", () => fi.click());
+  dz.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); fi.click(); } });
   dz.addEventListener("dragover", (e) => { e.preventDefault(); dz.classList.add("drag"); });
   dz.addEventListener("dragleave", () => dz.classList.remove("drag"));
   dz.addEventListener("drop", (e) => { e.preventDefault(); dz.classList.remove("drag"); if (e.dataTransfer.files[0]) uploadMesh(e.dataTransfer.files[0]); });
   fi.addEventListener("change", () => fi.files[0] && uploadMesh(fi.files[0]));
 }
 async function uploadMesh(file) {
-  $("#meshSummary").textContent = `Reading ${file.name} …`;
+  $("#meshSummary").textContent = `${t("reading")} ${file.name} …`;
   try {
     const buf = await file.arrayBuffer();
     const r = await fetch("/api/mesh", { method: "POST", headers: { "X-Filename": file.name }, body: buf });
     const info = await r.json();
     if (!r.ok) throw new Error(info.error);
-    S.meshId = info.id; S.meshInfo = info;
-    $("#meshSummary").innerHTML = `<b>${esc(info.name)}</b> · ${info.dim}D · ${info.cells.toLocaleString()} cells · ${info.faces.toLocaleString()} faces · volume ${fmt(info.volume, 5)} · read in ${info.read_seconds}s` +
-      (info.repaired_faces ? ` · <span style="color:var(--warn)">${info.repaired_faces} left-handed faces repaired</span>` : "");
-    renderZoneTable(info);
-    $("#zoneCard").classList.remove("hidden");
-    $("#propsCard").classList.remove("hidden");
-    $("#caseTitle").textContent = info.name;
-    if (info.dim === 2) {
-      S.geometry = parseGeometry(await api(`/api/mesh/${info.id}`));
-      S.frame = null; draw();
-    }
+    await renderMeshInfo(info);
   } catch (e) { $("#meshSummary").innerHTML = `<span style="color:var(--err)">${esc(e.message)}</span>`; }
+}
+async function renderMeshInfo(info) {
+  S.meshId = info.id; S.meshInfo = info;
+  $("#meshSummary").innerHTML = `<b>${esc(info.name)}</b> · ${info.dim}D · ${info.cells.toLocaleString()} cells · ${info.faces.toLocaleString()} faces · volume ${fmt(info.volume, 5)} · ${info.read_seconds}s` +
+    (info.repaired_faces ? ` · <span style="color:var(--warn)">${info.repaired_faces} left-handed faces repaired</span>` : "");
+  const q = info.quality;
+  if (q) {
+    const warn = (q.warnings || []).map((w) => `<div style="color:${w.startsWith("CRITICAL") ? "var(--err)" : "var(--warn)"}">${esc(w)}</div>`).join("");
+    $("#meshQuality").innerHTML = `<b>${esc(t("quality"))}</b>: ${esc(t("oq"))} ${fmt(q.min_orthogonal_quality, 3)} · ${esc(t("skew"))} ${fmt(q.max_skewness, 3)} · ${esc(t("ar"))} ${fmt(q.max_aspect_ratio, 3)}` +
+      (warn || ` · <span style="color:var(--ok)">${esc(t("qualityOk"))}</span>`);
+  }
+  renderZoneTable(info);
+  $("#zoneCard").classList.remove("hidden");
+  const solids = info.solid_zones || [];
+  $("#solidCard").classList.toggle("hidden", !solids.length);
+  $("#solidTable").innerHTML = solids.map((z) => `<tr data-solid="${esc(z)}"><td><b>${esc(z)}</b><div class="row" style="margin-top:4px">
+      <label class="grow"><span class="sr-only">${esc(z)} ${esc(t("conductivityOf"))}</span><input type="number" step="any" data-k="k" value="1" title="${esc(t("conductivityOf"))}"></label>
+      <label class="grow"><span class="sr-only">${esc(z)} ${esc(t("source"))}</span><input type="number" step="any" data-k="q" value="0" title="${esc(t("source"))}"></label></div></td></tr>`).join("");
+  if (solids.length) $("#uEnergy").checked = true;
+  $("#propsCard").classList.remove("hidden");
+  $("#caseTitle").textContent = info.name;
+  if (info.dim === 2) {
+    S.geometry = parseGeometry(await api(`/api/mesh/${info.id}`));
+    S.cellPaths = null; S.frame = null; draw();
+  }
 }
 function renderZoneTable(info) {
   const t = $("#zoneTable");
@@ -241,13 +305,16 @@ function buildSpec() {
         max_steps: +$("#maxSteps").value, t_end: tEnd === "" ? null : +tEnd, steady_tol: tol === "" ? null : +tol },
     };
   }
-  if (!S.meshId) throw new Error("Load a Fluent mesh first.");
+  if (!S.meshId) throw new Error(t("needMesh"));
+  const solids = {};
+  $$("#solidTable tr[data-solid]").forEach((tr) => { solids[tr.dataset.solid] = { conductivity: +$("input[data-k=k]", tr).value, source: +$("input[data-k=q]", tr).value }; });
   return {
     kind: "unstructured", mesh_id: S.meshId, checkpoint_seconds: +$("#ckpt").value || 0,
     case: {
       name: S.meshInfo.name, boundaries: zoneSpecs(), density: +$("#uDensity").value, viscosity: +$("#uViscosity").value,
-      energy: $("#uEnergy").checked, conductivity: +$("#uConductivity").value, cp: +$("#uCp").value,
-      algorithm: $("#algorithm").value, scheme: $("#uScheme").value, relax_u: +$("#relaxU").value, relax_p: +$("#relaxP").value,
+      energy: $("#uEnergy").checked || Object.keys(solids).length > 0, conductivity: +$("#uConductivity").value, cp: +$("#uCp").value,
+      turbulence: $("#uTurb").value, solids,
+      algorithm: $("#algorithm").value, scheme: $("#uScheme").value, relax_u: +$("#relaxU").value, relax_p: $("#relaxP").value.trim() === "" ? null : +$("#relaxP").value,
       max_iter: +$("#maxIter").value, tol: +$("#uTol").value, backend, precision: precision === "fp32" ? "fp32" : "fp64",
     },
   };
@@ -261,8 +328,8 @@ async function run() {
 }
 function resetRunView() {
   S.res = { keys: [], series: {}, x: [], labels: [] }; S.mon = []; S.resCount = 0;
-  $("#console").innerHTML = ""; $("#validation").innerHTML = '<div class="muted">Running…</div>';
-  $("#planTable").innerHTML = '<tr><td class="muted">Measuring backends…</td></tr>';
+  $("#console").innerHTML = ""; $("#validation").innerHTML = `<div class="muted">${esc(t("running"))}</div>`;
+  $("#planTable").innerHTML = `<tr><td class="muted">${esc(t("measuring"))}</td></tr>`;
   drawResiduals(); drawMonitor();
 }
 
@@ -280,10 +347,12 @@ function connectEvents() {
 function onStatus(ev) {
   const st = ev.status;
   const pill = $("#statusPill");
-  pill.textContent = st + (ev.label && st === "running" ? ` · ${ev.label}` : "");
+  pill.dataset.status = st; pill.dataset.label = ev.label || "";
+  pill.textContent = statusText(st, ev.label);
   pill.className = "pill " + st;
   const busy = st === "running" || st === "planning";
   $("#runBtn").disabled = busy; $("#stopBtn").disabled = !busy;
+  $("#reportBtn").disabled = !["converged", "finished", "stopped"].includes(st);
   if (ev.name) $("#caseTitle").textContent = ev.name;
   if (ev.result) onResult(ev.result);
   if (st === "error") logLine({ level: "error", msg: ev.error });
@@ -301,7 +370,8 @@ function onPlan(ev) {
     $("#memBox").innerHTML = `<div class="row muted" style="justify-content:space-between"><span>Memory budget (${p.device})</span><span class="mono">${fmtBytes(mem.required)} / ${fmtBytes(mem.available)}</span></div><div class="membar"><div style="width:${(frac * 100).toFixed(1)}%"></div></div>`;
   }
 }
-const RES_COLORS = { continuity: "#e5e7eb", "x-velocity": "#f87171", "y-velocity": "#34d399", "z-velocity": "#60a5fa", energy: "#fbbf24" };
+const RES_COLORS = { "x-velocity": "#ef4444", "y-velocity": "#10b981", "z-velocity": "#3b82f6", energy: "#f59e0b", k: "#a855f7", omega: "#ec4899", epsilon: "#ec4899" };
+const resColor = (k) => (k === "continuity" ? cssVar("--text") : RES_COLORS[k]) || "#6366f1";
 function onResiduals(ev) {
   const R = S.res;
   S.resCount++;
@@ -390,18 +460,18 @@ function drawResiduals() {
   lo = Math.floor(Math.max(lo, -16)); hi = Math.ceil(Math.min(Math.max(hi, lo + 1), 4));
   const X = (i) => pad.l + (W - pad.l - pad.r) * (n > 1 ? i / (n - 1) : 0);
   const Y = (l) => pad.t + (H - pad.t - pad.b) * (hi - l) / (hi - lo);
-  ctx.font = "10px ui-monospace, monospace"; ctx.fillStyle = "#8796a8"; ctx.strokeStyle = "#1e2836"; ctx.lineWidth = 1;
+  ctx.font = "10px ui-monospace, monospace"; ctx.fillStyle = cssVar("--muted"); ctx.strokeStyle = cssVar("--chart-grid"); ctx.lineWidth = 1;
   for (let e = lo; e <= hi; e++) { const y = Y(e); ctx.beginPath(); ctx.moveTo(pad.l, y); ctx.lineTo(W - pad.r, y); ctx.stroke(); ctx.fillText(`1e${e}`, 4, y + 3); }
-  ctx.strokeStyle = "#2b3a50"; ctx.setLineDash([3, 3]);
+  ctx.strokeStyle = cssVar("--line"); ctx.setLineDash([3, 3]);
   for (const lab of R.labels) { if (lab.at > 1) { const x = X(lab.at - 1); ctx.beginPath(); ctx.moveTo(x, pad.t); ctx.lineTo(x, H - pad.b); ctx.stroke(); ctx.fillText(lab.label, x + 3, H - 5); } }
   ctx.setLineDash([]);
   for (const k of R.keys) {
-    ctx.strokeStyle = RES_COLORS[k] || "#a5b4fc"; ctx.lineWidth = 1.4; ctx.beginPath();
+    ctx.strokeStyle = resColor(k); ctx.lineWidth = 1.4; ctx.beginPath();
     let started = false;
     R.series[k].forEach((v, i) => { if (!(v > 0)) return; const x = X(i), y = Y(Math.log10(v)); if (!started) { ctx.moveTo(x, y); started = true; } else ctx.lineTo(x, y); });
     ctx.stroke();
   }
-  $("#resLegend").innerHTML = R.keys.map((k) => `<span><i style="background:${RES_COLORS[k] || "#a5b4fc"}"></i>${k}</span>`).join("");
+  $("#resLegend").innerHTML = R.keys.map((k) => `<span><i style="background:${resColor(k)}"></i>${esc(k)}</span>`).join("");
 }
 function drawMonitor() {
   const cv = $("#monChart"); const [ctx, W, H] = setupCanvas(cv);
@@ -409,10 +479,10 @@ function drawMonitor() {
   const d = S.mon.filter((v) => v !== null && v !== undefined && isFinite(v));
   if (d.length < 2) return;
   let lo = Math.min(...d), hi = Math.max(...d); if (hi === lo) { hi += 1e-12; lo -= 1e-12; }
-  ctx.strokeStyle = "#3fb6ff"; ctx.lineWidth = 1.5; ctx.beginPath();
+  ctx.strokeStyle = cssVar("--accent"); ctx.lineWidth = 1.5; ctx.beginPath();
   d.forEach((v, i) => { const x = 4 + (W - 8) * i / (d.length - 1), y = 6 + (H - 12) * (hi - v) / (hi - lo); i ? ctx.lineTo(x, y) : ctx.moveTo(x, y); });
   ctx.stroke();
-  ctx.fillStyle = "#8796a8"; ctx.font = "10px ui-monospace, monospace";
+  ctx.fillStyle = cssVar("--muted"); ctx.font = "10px ui-monospace, monospace";
   ctx.fillText(fmt(hi, 4), 6, 12); ctx.fillText(fmt(lo, 4), 6, H - 4);
 }
 
@@ -437,6 +507,7 @@ function draw() {
   if (f && f.mesh === "structured") drawStructured(ctx, W, H, f, cmap);
   else if (S.geometry) drawUnstructured(ctx, W, H, f, cmap);
   drawColorbar(f, cmap);
+  if (f) $("#view").setAttribute("aria-label", `${t("fieldImage")} ${f.field}: ${fmt(f.min, 4)} … ${fmt(f.max, 4)}`);
 }
 function drawStructured(ctx, W, H, f, cmap) {
   const { nx, ny, lx, ly } = f;
@@ -543,9 +614,9 @@ function drawUnstructured(ctx, W, H, f, cmap) {
   ctx.lineWidth = 0.5;
   for (let c = 0; c < g.cells; c++) {
     if (f) { const k = 3 * Math.max(0, Math.min(255, Math.round((f.values[c] - lo) * inv))); ctx.fillStyle = `rgb(${cmap[k]},${cmap[k + 1]},${cmap[k + 2]})`; }
-    else ctx.fillStyle = "#1a2433";
+    else ctx.fillStyle = cssVar("--panel-2");
     ctx.fill(S.cellPaths.paths[c]);
-    if (edges || !f) { ctx.strokeStyle = f ? "rgba(0,0,0,0.35)" : "#3b4d66"; ctx.stroke(S.cellPaths.paths[c]); }
+    if (edges || !f) { ctx.strokeStyle = f ? "rgba(0,0,0,0.35)" : cssVar("--muted"); ctx.stroke(S.cellPaths.paths[c]); }
   }
   if (!f) $("#empty").classList.add("hidden");
 }
@@ -555,8 +626,8 @@ function drawColorbar(f, cmap) {
   if (!f) return;
   const bw = 14, x = 4;
   for (let y = 0; y < H - 20; y++) { const k = 3 * Math.round(255 * (1 - y / (H - 21))); ctx.fillStyle = `rgb(${cmap[k]},${cmap[k + 1]},${cmap[k + 2]})`; ctx.fillRect(x, 10 + y, bw, 1); }
-  ctx.strokeStyle = "#3a4b62"; ctx.strokeRect(x, 10, bw, H - 20);
-  ctx.fillStyle = "#c9d4e0"; ctx.font = "10.5px ui-monospace, monospace";
+  ctx.strokeStyle = cssVar("--line"); ctx.strokeRect(x, 10, bw, H - 20);
+  ctx.fillStyle = cssVar("--text"); ctx.font = "10.5px ui-monospace, monospace";
   for (let i = 0; i <= 4; i++) { const v = f.max - (f.max - f.min) * i / 4; ctx.fillText(fmt(v, 3), x + bw + 4, 14 + (H - 24) * i / 4); }
 }
 function initHover() {
@@ -580,6 +651,69 @@ function initHover() {
   vp.addEventListener("mouseleave", () => { hv.style.display = "none"; });
 }
 
+/* ------------------------------------------------------------------ projects & report */
+function uiState() {
+  const params = {};
+  $$("#presetParams input").forEach((i) => { params[i.dataset.param] = i.value; });
+  const vals = {};
+  ["tEnd", "maxSteps", "steadyTol", "mode", "scheme", "cfl", "poisson", "algorithm", "uScheme", "relaxU", "relaxP", "maxIter", "uTol",
+    "backend", "precision", "ckpt", "uDensity", "uViscosity", "uConductivity", "uCp", "uTurb"].forEach((id) => { vals[id] = $("#" + id).value; });
+  ["fmg", "uEnergy"].forEach((id) => { vals[id] = $("#" + id).checked; });
+  return { source: S.source, preset: $("#presetSelect").value, params, vals, zones: S.source === "unstructured" ? zoneSpecs() : null };
+}
+async function refreshProjects() {
+  const { projects } = await api("/api/projects");
+  $("#projectList").innerHTML = projects.length ? projects.map((p) => `<tr><td><b>${esc(p.name)}</b><div class="muted">${esc(p.title || "")} · ${esc(p.kind || "")} · ${esc(t("saved"))} ${esc(p.saved || "")}${p.has_result ? " · ✓" : ""}</div></td>
+      <td style="text-align:end"><button class="btn small" type="button" data-open="${esc(p.name)}">${esc(t("open"))}</button></td></tr>`).join("")
+    : `<tr><td class="muted">${esc(t("noProjects"))}</td></tr>`;
+  $$("[data-open]").forEach((b) => b.addEventListener("click", () => openProject(b.dataset.open)));
+}
+async function saveProject() {
+  const name = $("#projectName").value.trim();
+  if (!name) { $("#projectMsg").textContent = t("needName"); return; }
+  try {
+    let spec = null;
+    try { spec = buildSpec(); } catch (e) { spec = { kind: S.source }; }
+    const r = await post("/api/projects", { name, spec, ui: uiState(), title: $("#caseTitle").textContent });
+    $("#projectMsg").textContent = `${t("projectSaved")} ${r.name}`;
+    refreshProjects();
+  } catch (e) { $("#projectMsg").textContent = e.message; }
+}
+async function openProject(name) {
+  try {
+    const r = await api(`/api/projects/${encodeURIComponent(name)}`);
+    const ui = r.project.ui || {};
+    setSource(ui.source || "structured");
+    if (ui.preset) { $("#presetSelect").value = ui.preset; renderPresetParams(); }
+    for (const [k, v] of Object.entries(ui.params || {})) { const el = $(`#presetParams input[data-param="${k}"]`); if (el) el.value = v; }
+    for (const [k, v] of Object.entries(ui.vals || {})) { const el = $("#" + k); if (!el) continue; if (el.type === "checkbox") el.checked = !!v; else el.value = v; }
+    if (r.mesh) {
+      await renderMeshInfo(r.mesh);
+      for (const [zone, spec] of Object.entries(ui.zones || {})) {
+        const tr = $(`#zoneTable tr[data-zone="${CSS.escape(zone)}"]`); if (!tr) continue;
+        $("select[data-k=kind]", tr).value = spec.kind;
+        const val = spec.normal_speed ?? (spec.velocity ? spec.velocity.join(",") : (spec.pressure ?? ""));
+        $("input[data-k=val]", tr).value = val;
+        if (spec.thermal && spec.thermal !== "adiabatic") $("input[data-k=therm]", tr).value = `${spec.thermal === "flux" ? "q" : "T"}=${spec.value}`;
+      }
+    }
+    $("#projectMsg").textContent = `${t("projectOpened")} ${r.project.name}`;
+    $("#caseTitle").textContent = r.project.title || r.project.name;
+    $("#projectsDialog").close();
+  } catch (e) { $("#projectMsg").textContent = e.message; }
+}
+async function exportReport() {
+  try {
+    let image = null;
+    try { image = $("#view").toDataURL("image/png"); } catch (e) { image = null; }
+    const r = await fetch("/api/report", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ image }) });
+    if (!r.ok) { const j = await r.json().catch(() => ({})); throw new Error(j.error || r.statusText); }
+    const blob = await r.blob(); const a = document.createElement("a");
+    const m = (r.headers.get("Content-Disposition") || "").match(/filename="([^"]+)"/);
+    a.href = URL.createObjectURL(blob); a.download = m ? m[1] : "flowtrace_report.html"; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+  } catch (e) { logLine({ level: "error", msg: `${t("reportFailed")} ${e.message}` }); }
+}
+
 /* ------------------------------------------------------------------ boot */
 async function restoreState() {
   const st = await api("/api/state");
@@ -591,14 +725,21 @@ async function restoreState() {
   }
 }
 function init() {
+  applyI18n();
   initTabs(); initMeshUpload(); initHover();
+  $("#langBtn").addEventListener("click", () => setLang(LANG === "fa" ? "en" : "fa"));
+  $("#themeBtn").addEventListener("click", cycleTheme);
+  $("#projectsBtn").addEventListener("click", () => { $("#projectMsg").textContent = ""; refreshProjects().catch((e) => { $("#projectMsg").textContent = e.message; }); $("#projectsDialog").showModal(); });
+  $("#saveProjectBtn").addEventListener("click", saveProject);
+  $("#reportBtn").addEventListener("click", exportReport);
+  try { window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", redrawAll); } catch (e) { /* old browsers */ }
   $("#runBtn").addEventListener("click", run);
   $("#stopBtn").addEventListener("click", () => post("/api/stop"));
   $("#mode").addEventListener("change", () => setSource(S.source));
   $("#fieldSelect").addEventListener("change", (e) => post("/api/view", { field: e.target.value }));
   ["#cmapSelect", "#showStream", "#showVectors", "#showEdges", "#smooth"].forEach((s) => $(s).addEventListener("change", draw));
   $("#benchBtn").addEventListener("click", async () => {
-    $("#benchBtn").disabled = true; $("#benchBox").textContent = "Benchmarking every backend…";
+    $("#benchBtn").disabled = true; $("#benchBox").textContent = t("benchRunning");
     try { renderBench(await post("/api/benchmark")); } catch (e) { $("#benchBox").textContent = e.message; }
     $("#benchBtn").disabled = false;
   });

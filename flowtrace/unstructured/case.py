@@ -71,7 +71,9 @@ class UnstructuredCase:
     body_force: List[float] = field(default_factory=lambda: [0.0, 0.0, 0.0])  # uniform force per volume
     algorithm: str = "SIMPLEC"  # SIMPLE | SIMPLEC
     relax_u: float = 0.7
-    relax_p: float = 0.3
+    # pressure under-relaxation; None = automatic: SIMPLE 0.3, SIMPLEC 1.0 on orthogonal meshes and
+    # 0.8 when the mesh is non-orthogonal (> 5 deg), following Fluent's guidance for skewed meshes
+    relax_p: Optional[float] = None
     relax_T: float = 1.0
     scheme: str = "second-order"  # upwind | second-order
     # pressure force in momentum: "green-gauss" = sum_f p_f S_f (face pressures, as
@@ -110,8 +112,8 @@ class UnstructuredCase:
         if self.algorithm.upper() not in ("SIMPLE", "SIMPLEC"):
             raise ValueError("algorithm must be SIMPLE or SIMPLEC")
         self.algorithm = self.algorithm.upper()
-        if self.algorithm == "SIMPLEC" and self.relax_p == 0.3:
-            self.relax_p = 1.0  # SIMPLEC needs no pressure under-relaxation
+        if self.relax_p is None and self.algorithm == "SIMPLE":
+            self.relax_p = 0.3
         from .turbulence import MODELS
 
         if self.turbulence not in MODELS:

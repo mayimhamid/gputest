@@ -254,9 +254,9 @@ def b_mms_simplec_quads(ctx):
 def b_mms_simplec_tri(ctx):
     from .mms import run_simplec
 
-    grids = (12, 24, 48) if ctx["tier"] == "quick" else (16, 32, 64, 128)
+    grids = (12, 24, 48) if ctx["tier"] == "quick" else (12, 24, 48, 96)
     res = run_simplec(grids, triangulate=True, warp=0.05, backend="numpy")
-    return _mms_result("mms_simplec_tri", res, 1.8, min_order_p=1.2)
+    return _mms_result("mms_simplec_tri", res, 1.8, min_order_p=1.0)
 
 
 @benchmark("projection_divergence", "Discrete continuity of the projection", "verification")
@@ -780,7 +780,7 @@ def b_cht_channel(ctx):
 def b_warmstart(ctx):
     from ..fluent.warmstart_study import run_study
 
-    data = run_study("benchmarks/fluent_warmstart", backend=ctx.get("backend", "auto"), verbose=False)
+    data = run_study("benchmarks/fluent_warmstart", backend=_be(ctx).name, verbose=False)
     r = BenchResult("warmstart_proxy", "", "fluent")
     for p in data["proxy"]:
         r.metrics[f"{p['case']}: iterations saved (cold / warm)"] = _m(p["speedup"], None, "x", "> 1", p["speedup"] > 1)

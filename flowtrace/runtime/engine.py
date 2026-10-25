@@ -386,7 +386,7 @@ class Job:
                 {"stage": "AMG hierarchy setup", "device": "CPU", "method": "smoothed aggregation, rebuilt every 10 its",
                  "reason": "irregular graph work stays on the host"},
             ],
-            "notes": [f"{ucase.algorithm}, {ucase.scheme}, relax u={ucase.relax_u} p={ucase.relax_p}"],
+            "notes": [f"{ucase.algorithm}, {ucase.scheme}, relax u={ucase.relax_u} p={desc.get('relax_p', ucase.relax_p)}"],
         }
         self.plan = plan
         self.hub.publish({"type": "plan", "plan": plan, "describe": desc})

@@ -1,133 +1,154 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" dir="ltr">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>FlowTrace Solver</title>
 <link rel="stylesheet" href="/static/style.css">
+<script>
+  /* apply the saved theme before first paint (no flash) */
+  (function () { try { var th = localStorage.getItem("ft-theme"); if (th === "light" || th === "dark") document.documentElement.dataset.theme = th; } catch (e) { /* storage blocked */ } })();
+</script>
 </head>
 <body>
+<a class="skip" href="#viewport" data-i18n="skip">Skip to the results view</a>
 <header>
-  <div class="brand"><div class="logo"></div><div>FlowTrace<small>heterogeneous CFD solver · Fluent-ready</small></div></div>
-  <div class="case-title" id="caseTitle">No case running</div>
+  <div class="brand"><div class="logo" aria-hidden="true"></div><div>FlowTrace<small data-i18n="tagline">CFD solver · compatible with Ansys Fluent files</small></div></div>
+  <div class="case-title" id="caseTitle" data-i18n="noCase">No case running</div>
   <div class="spacer"></div>
   <div class="chips" id="hwChips"></div>
-  <span class="pill" id="statusPill">idle</span>
-  <button class="btn primary" id="runBtn">▶ Run</button>
-  <button class="btn danger" id="stopBtn" disabled>■ Stop</button>
+  <span class="pill" id="statusPill" role="status" aria-live="polite">idle</span>
+  <button class="btn" id="projectsBtn" data-i18n="projects" aria-haspopup="dialog">Projects</button>
+  <button class="btn" id="reportBtn" data-i18n="exportReport" disabled>Export report</button>
+  <button class="btn icon" id="langBtn" data-i18n-aria="language" aria-label="Language" title="فارسی / English">فا</button>
+  <button class="btn icon" id="themeBtn" data-i18n-aria="theme" aria-label="Theme" title="Theme">◐</button>
+  <button class="btn primary" id="runBtn"><span aria-hidden="true">▶ </span><span data-i18n="run">Run</span></button>
+  <button class="btn danger" id="stopBtn" disabled><span aria-hidden="true">■ </span><span data-i18n="stop">Stop</span></button>
 </header>
 
 <div class="app">
-  <aside class="left">
-    <div class="tabs" id="tabs">
-      <button data-tab="case" class="active">Case</button>
-      <button data-tab="solver">Solver</button>
-      <button data-tab="hardware">Hardware</button>
-      <button data-tab="fluent">Fluent</button>
+  <aside class="left" aria-label="Setup">
+    <div class="tabs" id="tabs" role="tablist">
+      <button role="tab" id="tab-case" aria-controls="panel-case" aria-selected="true" data-tab="case" class="active" data-i18n="tabCase">Case</button>
+      <button role="tab" id="tab-solver" aria-controls="panel-solver" aria-selected="false" tabindex="-1" data-tab="solver" data-i18n="tabSolver">Solver</button>
+      <button role="tab" id="tab-hardware" aria-controls="panel-hardware" aria-selected="false" tabindex="-1" data-tab="hardware" data-i18n="tabHardware">Hardware</button>
+      <button role="tab" id="tab-fluent" aria-controls="panel-fluent" aria-selected="false" tabindex="-1" data-tab="fluent" data-i18n="tabFluent">Fluent</button>
     </div>
     <div class="tab-body">
       <!-- CASE -->
-      <section data-tab="case" class="active">
-        <div class="seg" id="sourceSeg">
-          <button data-src="structured" class="active">Built-in case</button>
-          <button data-src="unstructured">Fluent mesh</button>
+      <section data-tab="case" id="panel-case" role="tabpanel" aria-labelledby="tab-case" class="active">
+        <div class="seg" id="sourceSeg" role="group" data-i18n-aria="caseSource" aria-label="Case source">
+          <button data-src="structured" class="active" aria-pressed="true" data-i18n="builtin">Built-in case</button>
+          <button data-src="unstructured" aria-pressed="false" data-i18n="fluentMesh">Fluent mesh</button>
         </div>
         <div id="structuredCase" class="stack">
           <div class="card">
-            <h3>Case</h3>
-            <select id="presetSelect"></select>
+            <h3 data-i18n="case">Case</h3>
+            <select id="presetSelect" data-i18n-aria="case" aria-label="Case"></select>
             <div class="desc" id="presetDesc"></div>
             <div id="presetParams"></div>
           </div>
           <div class="card">
-            <h3>Grid & run control</h3>
-            <label class="field">End time (blank = steady)<input type="number" id="tEnd" step="any" placeholder="steady"></label>
-            <label class="field">Max steps<input type="number" id="maxSteps"></label>
-            <label class="field">Steady tolerance<input type="number" id="steadyTol" step="any"></label>
+            <h3 data-i18n="gridRun">Grid &amp; run control</h3>
+            <label class="field"><span data-i18n="endTime">End time (blank = steady)</span><input type="number" id="tEnd" step="any" placeholder="steady"></label>
+            <label class="field"><span data-i18n="maxSteps">Max steps</span><input type="number" id="maxSteps"></label>
+            <label class="field"><span data-i18n="steadyTol">Steady tolerance</span><input type="number" id="steadyTol" step="any"></label>
           </div>
         </div>
         <div id="unstructuredCase" class="stack hidden">
           <div class="card">
-            <h3>Fluent mesh (.msh / .msh.gz / legacy .cas)</h3>
-            <div class="dropzone" id="dropzone">Drop a Fluent mesh here or click to choose<input type="file" id="meshFile" class="hidden" accept=".msh,.gz,.cas"></div>
-            <div id="meshSummary" class="desc"></div>
+            <h3 data-i18n="meshTitle">Fluent mesh (.msh / .cas / .cas.h5)</h3>
+            <div class="dropzone" id="dropzone" role="button" tabindex="0" data-i18n="dropMesh">Drop a Fluent mesh here or click to choose</div>
+            <input type="file" id="meshFile" class="hidden" accept=".msh,.gz,.cas,.h5" aria-hidden="true" tabindex="-1">
+            <div id="meshSummary" class="desc" aria-live="polite"></div>
+            <div id="meshQuality" class="desc"></div>
           </div>
           <div class="card hidden" id="zoneCard">
-            <h3>Boundary conditions</h3>
+            <h3 data-i18n="bcs">Boundary conditions</h3>
             <table class="grid zone-table" id="zoneTable"></table>
           </div>
+          <div class="card hidden" id="solidCard">
+            <h3 data-i18n="solids">Solid zones (conjugate heat transfer)</h3>
+            <table class="grid" id="solidTable"></table>
+          </div>
           <div class="card hidden" id="propsCard">
-            <h3>Material & models</h3>
-            <label class="field">Density<input type="number" id="uDensity" value="1" step="any"></label>
-            <label class="field">Dynamic viscosity<input type="number" id="uViscosity" value="0.01" step="any"></label>
-            <label class="field">Energy equation<input type="checkbox" id="uEnergy"></label>
-            <label class="field">Conductivity<input type="number" id="uConductivity" value="0.01" step="any"></label>
-            <label class="field">Specific heat cp<input type="number" id="uCp" value="1" step="any"></label>
+            <h3 data-i18n="materials">Material &amp; models</h3>
+            <label class="field"><span data-i18n="density">Density</span><input type="number" id="uDensity" value="1" step="any"></label>
+            <label class="field"><span data-i18n="viscosity">Dynamic viscosity</span><input type="number" id="uViscosity" value="0.01" step="any"></label>
+            <label class="field"><span data-i18n="turbulence">Turbulence model</span><select id="uTurb">
+              <option value="laminar" data-i18n="laminar">Laminar</option>
+              <option value="k-omega-sst">k-ω SST</option>
+              <option value="k-epsilon-realizable">k-ε realizable</option>
+              <option value="k-epsilon-standard">k-ε standard</option>
+            </select></label>
+            <label class="field"><span data-i18n="energyEq">Energy equation</span><input type="checkbox" id="uEnergy"></label>
+            <label class="field"><span data-i18n="conductivity">Conductivity</span><input type="number" id="uConductivity" value="0.01" step="any"></label>
+            <label class="field"><span data-i18n="cp">Specific heat cp</span><input type="number" id="uCp" value="1" step="any"></label>
           </div>
         </div>
       </section>
 
       <!-- SOLVER -->
-      <section data-tab="solver">
+      <section data-tab="solver" id="panel-solver" role="tabpanel" aria-labelledby="tab-solver">
         <div class="stack">
           <div class="card" id="structSolverCard">
-            <h3>Structured solver</h3>
-            <label class="field">Algorithm<select id="mode">
-              <option value="transient">Transient projection (MAC, exact Poisson)</option>
-              <option value="steady-simplec">Steady SIMPLEC (Fluent-style)</option>
+            <h3 data-i18n="structSolver">Structured solver</h3>
+            <label class="field"><span data-i18n="algorithm">Algorithm</span><select id="mode">
+              <option value="transient" data-i18n="modeTransient">Transient projection (MAC, exact Poisson)</option>
+              <option value="steady-simplec" data-i18n="modeSimplec">Steady SIMPLEC (Fluent-style)</option>
             </select></label>
-            <label class="field">Convection scheme<select id="scheme">
+            <label class="field"><span data-i18n="convScheme">Convection scheme</span><select id="scheme">
               <option value="quick">QUICK</option><option value="vanleer">van Leer TVD</option>
-              <option value="upwind">1st-order upwind</option><option value="central">Central</option>
+              <option value="upwind" data-i18n="upwind1">1st-order upwind</option><option value="central" data-i18n="central">Central</option>
             </select></label>
-            <label class="field">CFL<input type="number" id="cfl" value="0.5" step="0.05"></label>
-            <label class="field">Pressure solver<select id="poisson">
-              <option value="auto">Auto-tuned</option><option value="fast">Spectral (DCT/DST/FFT)</option>
-              <option value="eig">Dense diagonalisation (GEMM)</option><option value="mg">Multigrid-PCG</option>
+            <label class="field"><span>CFL</span><input type="number" id="cfl" value="0.5" step="0.05"></label>
+            <label class="field"><span data-i18n="pSolver">Pressure solver</span><select id="poisson">
+              <option value="auto" data-i18n="autotuned">Auto-tuned</option><option value="fast" data-i18n="spectral">Spectral (DCT/DST/FFT)</option>
+              <option value="eig" data-i18n="gemm">Dense diagonalisation (GEMM)</option><option value="mg" data-i18n="mg">Multigrid-PCG</option>
             </select></label>
-            <label class="field">FMG grid sequencing<input type="checkbox" id="fmg" checked></label>
+            <label class="field"><span data-i18n="fmg">FMG grid sequencing</span><input type="checkbox" id="fmg" checked></label>
           </div>
           <div class="card" id="unstructSolverCard">
-            <h3>Pressure-based solver</h3>
-            <label class="field">Scheme<select id="algorithm"><option>SIMPLEC</option><option>SIMPLE</option></select></label>
-            <label class="field">Momentum discretisation<select id="uScheme"><option value="second-order">Second-order upwind</option><option value="upwind">First-order upwind</option></select></label>
-            <label class="field">Relaxation: momentum<input type="number" id="relaxU" value="0.7" step="0.05"></label>
-            <label class="field">Relaxation: pressure<input type="number" id="relaxP" value="1.0" step="0.05"></label>
-            <label class="field">Max iterations<input type="number" id="maxIter" value="3000"></label>
-            <label class="field">Residual target<input type="number" id="uTol" value="1e-5" step="any"></label>
+            <h3 data-i18n="pbSolver">Pressure-based solver</h3>
+            <label class="field"><span data-i18n="scheme">Scheme</span><select id="algorithm"><option>SIMPLEC</option><option>SIMPLE</option></select></label>
+            <label class="field"><span data-i18n="momDisc">Momentum discretisation</span><select id="uScheme"><option value="second-order" data-i18n="so">Second-order upwind</option><option value="upwind" data-i18n="upwind1">First-order upwind</option></select></label>
+            <label class="field"><span data-i18n="relaxU">Relaxation: momentum</span><input type="number" id="relaxU" value="0.7" step="0.05"></label>
+            <label class="field"><span data-i18n="relaxP">Relaxation: pressure</span><input type="number" id="relaxP" value="" placeholder="auto" step="0.05"></label>
+            <label class="field"><span data-i18n="maxIter">Max iterations</span><input type="number" id="maxIter" value="3000"></label>
+            <label class="field"><span data-i18n="resTarget">Residual target</span><input type="number" id="uTol" value="1e-5" step="any"></label>
           </div>
           <div class="card">
-            <h3>Execution</h3>
-            <label class="field">Backend<select id="backend"><option value="auto">Auto (measure & choose)</option></select></label>
-            <label class="field">Precision<select id="precision"><option value="auto">Auto</option><option value="fp64">FP64</option><option value="fp32">FP32</option></select></label>
-            <label class="field">Checkpoint every (s)<input type="number" id="ckpt" value="0" step="5"></label>
-            <button class="btn small" id="estimateBtn">Estimate memory</button>
-            <div id="estimateOut" class="desc"></div>
+            <h3 data-i18n="execution">Execution</h3>
+            <label class="field"><span data-i18n="backend">Backend</span><select id="backend"><option value="auto" data-i18n="autoBackend">Auto (measure &amp; choose)</option></select></label>
+            <label class="field"><span data-i18n="precision">Precision</span><select id="precision"><option value="auto" data-i18n="auto">Auto</option><option value="fp64">FP64</option><option value="fp32">FP32</option></select></label>
+            <label class="field"><span data-i18n="ckpt">Checkpoint every (s)</span><input type="number" id="ckpt" value="0" step="5"></label>
+            <button class="btn small" id="estimateBtn" data-i18n="estimate">Estimate memory</button>
+            <div id="estimateOut" class="desc" aria-live="polite"></div>
           </div>
         </div>
       </section>
 
       <!-- HARDWARE -->
-      <section data-tab="hardware">
+      <section data-tab="hardware" id="panel-hardware" role="tabpanel" aria-labelledby="tab-hardware">
         <div class="stack">
-          <div class="card"><h3>Target system</h3><table class="kv" id="sysTable"></table></div>
-          <div class="card"><h3>GPU<span class="right" id="gpuCount"></span></h3><div id="gpuBox" class="desc">probing…</div></div>
+          <div class="card"><h3 data-i18n="target">Target system</h3><table class="kv" id="sysTable"></table></div>
+          <div class="card"><h3><span>GPU</span><span class="right" id="gpuCount"></span></h3><div id="gpuBox" class="desc">…</div></div>
           <div class="card">
-            <h3>Measured throughput <button class="btn small right" id="benchBtn">Run benchmark</button></h3>
-            <div id="benchBox" class="desc">Micro-benchmarks measure memory bandwidth, GEMM, DCT and stencil throughput of every backend. The planner also times real solver steps before each run.</div>
+            <h3><span data-i18n="throughput">Measured throughput</span> <button class="btn small right" id="benchBtn" data-i18n="runBench">Run benchmark</button></h3>
+            <div id="benchBox" class="desc" data-i18n="benchHelp" aria-live="polite">Micro-benchmarks measure memory bandwidth, GEMM, DCT and stencil throughput of every backend. The planner also times real solver steps before each run.</div>
           </div>
-          <div class="card"><h3>Notes</h3><div id="sysNotes" class="desc"></div></div>
+          <div class="card"><h3 data-i18n="notes">Notes</h3><div id="sysNotes" class="desc"></div></div>
         </div>
       </section>
 
       <!-- FLUENT -->
-      <section data-tab="fluent">
+      <section data-tab="fluent" id="panel-fluent" role="tabpanel" aria-labelledby="tab-fluent">
         <div class="stack">
           <div class="card">
-            <h3>Hand-off to Ansys Fluent</h3>
-            <div class="desc">Export the current solution as a Fluent mesh with named zones plus an interpolation file. In Fluent: <b>File › Read › Mesh</b>, then <b>File › Interpolate › Read and Interpolate</b> to start from the FlowTrace field (warm start) — or run the generated journal / PyFluent script.</div>
+            <h3 data-i18n="handoff">Hand-off to Ansys Fluent</h3>
+            <div class="desc" data-i18n="handoffHelp">Export the current solution as a Fluent mesh with named zones plus an interpolation file. In Fluent: File › Read › Mesh, then File › Interpolate › Read and Interpolate to start from the FlowTrace field (warm start), or run the generated journal / PyFluent script.</div>
             <div class="row" style="flex-wrap:wrap; margin-top:8px">
-              <button class="btn primary small" data-export="zip">Download package (.zip)</button>
+              <button class="btn primary small" data-export="zip" data-i18n="downloadPkg">Download package (.zip)</button>
               <button class="btn small" data-export="msh">.msh</button>
               <button class="btn small" data-export="ip">.ip</button>
               <button class="btn small" data-export="jou">.jou</button>
@@ -135,69 +156,84 @@
               <button class="btn small" data-export="csv">.csv</button>
             </div>
           </div>
-          <div class="card"><h3>PyFluent link</h3><div id="pyfluentBox" class="desc"></div></div>
+          <div class="card"><h3>PyFluent</h3><div id="pyfluentBox" class="desc"></div></div>
+          <div class="card"><div class="desc" data-i18n="trademark">Ansys and Fluent are trademarks of ANSYS, Inc. FlowTrace is an independent project, compatible with but not affiliated with or endorsed by ANSYS, Inc.</div></div>
         </div>
       </section>
     </div>
   </aside>
 
   <main>
-    <div class="toolbar">
-      <label>Field <select id="fieldSelect"></select></label>
-      <label>Colormap <select id="cmapSelect">
+    <div class="toolbar" role="toolbar" data-i18n-aria="viewOptions" aria-label="View options">
+      <label><span data-i18n="field">Field</span> <select id="fieldSelect"></select></label>
+      <label><span data-i18n="colormap">Colormap</span> <select id="cmapSelect">
         <option value="turbo">Turbo</option><option value="viridis">Viridis</option>
         <option value="rainbow">Rainbow (Fluent)</option><option value="coolwarm">Cool-warm</option><option value="gray">Gray</option>
       </select></label>
-      <label><input type="checkbox" id="showStream" checked> Streamlines</label>
-      <label><input type="checkbox" id="showVectors"> Vectors</label>
-      <label><input type="checkbox" id="showEdges"> Mesh</label>
-      <label><input type="checkbox" id="smooth" checked> Smooth</label>
+      <label><input type="checkbox" id="showStream" checked> <span data-i18n="streamlines">Streamlines</span></label>
+      <label><input type="checkbox" id="showVectors"> <span data-i18n="vectors">Vectors</span></label>
+      <label><input type="checkbox" id="showEdges"> <span data-i18n="mesh">Mesh</span></label>
+      <label><input type="checkbox" id="smooth" checked> <span data-i18n="smooth">Smooth</span></label>
       <div class="spacer"></div>
       <span class="muted mono" id="frameInfo"></span>
     </div>
-    <div class="viewport" id="viewport">
-      <canvas id="view"></canvas>
-      <canvas class="colorbar" id="colorbar"></canvas>
+    <div class="viewport" id="viewport" tabindex="-1">
+      <canvas id="view" role="img" aria-label="Flow field"></canvas>
+      <canvas class="colorbar" id="colorbar" aria-hidden="true"></canvas>
       <div class="hud hidden" id="hud"></div>
       <div class="hover" id="hover"></div>
-      <div class="empty" id="empty"><div class="big">Ready.</div><div>Pick a case or load a Fluent mesh, then press <b>Run</b>.<br>FlowTrace measures your hardware and places every stage where it runs fastest.</div></div>
+      <div class="empty" id="empty"><div class="big" data-i18n="ready">Ready.</div><div data-i18n="readyHelp">Pick a case or load a Fluent mesh, then press Run. FlowTrace measures your hardware and places every stage where it runs fastest.</div></div>
     </div>
     <div class="bottom">
-      <div class="console" id="console"></div>
-      <div class="validation" id="validation"><div class="muted">Validation against reference data appears here when a run finishes.</div></div>
+      <div class="console" id="console" role="log" data-i18n-aria="logLabel" aria-label="Solver log"></div>
+      <div class="validation" id="validation" aria-live="polite"><div class="muted" data-i18n="valHelp">Validation against reference data appears here when a run finishes.</div></div>
     </div>
   </main>
 
-  <aside class="right">
+  <aside class="right" aria-label="Monitors">
     <div class="card">
-      <h3>Residuals <span class="right muted" id="resInfo"></span></h3>
-      <canvas class="chart" id="resChart"></canvas>
+      <h3><span data-i18n="residuals">Residuals</span> <span class="right muted" id="resInfo"></span></h3>
+      <canvas class="chart" id="resChart" role="img" data-i18n-aria="residualChart" aria-label="Residual history chart"></canvas>
       <div class="legend" id="resLegend"></div>
     </div>
     <div class="card">
-      <h3>Performance</h3>
+      <h3 data-i18n="performance">Performance</h3>
       <div class="stats">
-        <div class="stat"><div class="k">Step</div><div class="v" id="sStep">–</div></div>
-        <div class="stat"><div class="k">Time</div><div class="v" id="sTime">–</div></div>
+        <div class="stat"><div class="k" data-i18n="step">Step</div><div class="v" id="sStep">–</div></div>
+        <div class="stat"><div class="k" data-i18n="time">Time</div><div class="v" id="sTime">–</div></div>
         <div class="stat"><div class="k">Δt</div><div class="v" id="sDt">–</div></div>
-        <div class="stat"><div class="k">Steps/s</div><div class="v" id="sRate">–</div></div>
+        <div class="stat"><div class="k" data-i18n="stepsPerS">Steps/s</div><div class="v" id="sRate">–</div></div>
         <div class="stat"><div class="k">Mcell/s</div><div class="v" id="sMcell">–</div></div>
-        <div class="stat"><div class="k" id="sExtraK">Monitor</div><div class="v" id="sExtra">–</div></div>
+        <div class="stat"><div class="k" id="sExtraK" data-i18n="monitor">Monitor</div><div class="v" id="sExtra">–</div></div>
       </div>
-      <div class="timers" id="timerBar"></div>
+      <div class="timers" id="timerBar" aria-hidden="true"></div>
       <div class="legend" id="timerLegend"></div>
     </div>
     <div class="card">
-      <h3>Monitor <span class="right muted" id="monName"></span></h3>
-      <canvas class="spark" id="monChart"></canvas>
+      <h3><span data-i18n="monitor">Monitor</span> <span class="right muted" id="monName"></span></h3>
+      <canvas class="spark" id="monChart" role="img" data-i18n-aria="monitorChart" aria-label="Monitor history"></canvas>
     </div>
     <div class="card">
-      <h3>Execution plan <span class="right muted" id="planBackend"></span></h3>
-      <table class="grid" id="planTable"><tr><td class="muted">The plan appears when a run starts.</td></tr></table>
+      <h3><span data-i18n="plan">Execution plan</span> <span class="right muted" id="planBackend"></span></h3>
+      <table class="grid" id="planTable"><tr><td class="muted" data-i18n="planHelp">The plan appears when a run starts.</td></tr></table>
       <div style="margin-top:8px" id="memBox"></div>
     </div>
   </aside>
 </div>
+
+<dialog id="projectsDialog" aria-labelledby="projectsTitle">
+  <form method="dialog" class="dlg">
+    <h2 id="projectsTitle" data-i18n="projects">Projects</h2>
+    <div class="row">
+      <label class="grow"><span class="sr-only" data-i18n="projectName">Project name</span><input type="text" id="projectName" data-i18n-placeholder="projectName" placeholder="Project name" maxlength="80"></label>
+      <button class="btn primary" id="saveProjectBtn" type="button" data-i18n="save">Save</button>
+    </div>
+    <div class="desc" id="projectMsg" aria-live="polite"></div>
+    <table class="grid" id="projectList"></table>
+    <div class="row end"><button class="btn" value="close" data-i18n="close">Close</button></div>
+  </form>
+</dialog>
+<script src="/static/i18n.js"></script>
 <script src="/static/app.js"></script>
 </body>
 </html>

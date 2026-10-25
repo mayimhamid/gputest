@@ -6,6 +6,7 @@ transferred to the host; vectors stay on the device.
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 from typing import Callable, Optional
 
@@ -73,8 +74,11 @@ def bicgstab(A: Callable, b, xp, M: Optional[Callable] = None, x0=None, tol: flo
     x = xp.zeros_like(b) if x0 is None else x0.copy()
     r = b - A(x) if x0 is not None else b.copy()
     rnorm = float(xp.linalg.norm(r))
-    bnorm = (rnorm if relative_to_initial else float(xp.linalg.norm(b))) or 1.0
-    if rnorm / bnorm < tol:
+    b_abs = float(xp.linalg.norm(b))
+    bnorm = (rnorm if relative_to_initial else b_abs) or 1.0
+    # an initial residual at round-off level cannot be reduced further; iterating on it
+    # makes the recurrence coefficients overflow (seen when an outer iteration has converged)
+    if rnorm / bnorm < tol or rnorm <= 1e-14 * b_abs:
         return x, KrylovInfo(0, rnorm / bnorm, True)
     r_hat = r.copy()
     rho = alpha = omega = 1.0
@@ -102,10 +106,13 @@ def bicgstab(A: Callable, b, xp, M: Optional[Callable] = None, x0=None, tol: flo
         t = A(shat)
         tt = _dot(xp, t, t)
         omega = _dot(xp, t, s) / tt if tt > 0 else 0.0
-        x += alpha * phat + omega * shat
+        x_new = x + alpha * phat + omega * shat
         r = s - omega * t
         rnorm = float(xp.linalg.norm(r))
-        if rnorm / bnorm < tol:
+        if not math.isfinite(rnorm):  # breakdown: keep the last finite iterate
+            return x, KrylovInfo(k, float("nan"), False)
+        x = x_new
+        if rnorm / bnorm < tol or rnorm <= 1e-14 * b_abs:
             return x, KrylovInfo(k, rnorm / bnorm, True)
         if omega == 0.0:
             break
