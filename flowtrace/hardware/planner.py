@@ -17,7 +17,7 @@ import numpy as np
 
 from .backend import BackendUnavailable, available_backends, get_backend
 from .memory import estimate_structured, fmt_bytes
-from .probe import SystemProfile, probe_system
+from .probe import SystemProfile, cached_profile
 
 
 @dataclass
@@ -71,7 +71,7 @@ def plan_structured(case, autotune: bool = True, steps: Optional[int] = None,
     from ..structured.sequencing import fmg_factors
     from ..structured.solver import MACSolver, resolve_dtype
 
-    profile = profile or probe_system()
+    profile = profile or cached_profile()
     cands = _candidates(case.backend)
     has_obs = bool(case.obstacles)
     cells = case.nx * case.ny

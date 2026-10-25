@@ -403,3 +403,14 @@ def probe_system(workdir: Optional[str] = None) -> SystemProfile:
     if prof.libraries.get("numba") is None:
         notes.append("Numba not installed: CPU stencils run as vectorised NumPy (pip install numba).")
     return prof
+
+
+_CACHED: Optional[SystemProfile] = None
+
+
+def cached_profile() -> SystemProfile:
+    """Probe once per process (static facts: devices, capabilities)."""
+    global _CACHED
+    if _CACHED is None:
+        _CACHED = probe_system()
+    return _CACHED

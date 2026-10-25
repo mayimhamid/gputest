@@ -45,9 +45,9 @@ def resolve_dtype(case: StructuredCase, backend) -> np.dtype:
     if case.precision == "fp32":
         return np.dtype(np.float32)
     if backend.is_gpu:
-        from ..hardware.probe import probe_system
+        from ..hardware.probe import cached_profile
 
-        gpu = probe_system().best_gpu
+        gpu = cached_profile().best_gpu
         if gpu is not None and gpu.is_datacenter_fp64:
             return np.dtype(np.float64)
         return np.dtype(np.float32)
