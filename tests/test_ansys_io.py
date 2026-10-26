@@ -81,6 +81,33 @@ def test_dat_h5_roundtrip(tmp_path):
         write_data_h5(str(tmp_path / "bad.dat.h5"), m, {"pressure": np.zeros(3)})
 
 
+def test_reads_fluent_2025_layout(tmp_path):
+    """Fluent Meshing 2025 R1 writes scalar attributes as one-element arrays and numbers the
+    node-coordinate sections 1..n (each with its own minId/maxId) instead of keying them by
+    node-zone id. Both broke the reader on a real 3.2M-cell rocket mesh."""
+    m = extrude_to_3d(cartesian_mesh_2d(4, 3), 2, 0.5)
+    p = tmp_path / "m.msh.h5"
+    write_case_h5(m, str(p))
+    with h5py.File(p, "r+") as f:
+        def arrayify(obj):
+            for k, v in list(obj.attrs.items()):
+                if np.ndim(v) == 0 and np.issubdtype(np.asarray(v).dtype, np.integer):
+                    obj.attrs[k] = np.asarray([v], dtype=np.uint64)
+        f.visititems(lambda name, obj: arrayify(obj))
+        arrayify(f["meshes/1"])
+        nz = f["meshes/1/nodes/zoneTopology"]
+        coords = f["meshes/1/nodes/coords"]
+        for i, (zid, lo, hi) in enumerate(zip(nz["id"][()], nz["minId"][()], nz["maxId"][()]), start=1):
+            data = coords[str(int(zid))][()]
+            del coords[str(int(zid))]
+            ds = coords.create_dataset(str(i) + "_tmp", data=data)
+            ds.attrs["minId"], ds.attrs["maxId"] = np.asarray([lo], np.uint64), np.asarray([hi], np.uint64)
+        for i in range(1, len(nz["id"][()]) + 1):
+            coords.move(f"{i}_tmp", str(i))
+        nz["id"][...] = np.asarray(nz["id"][()]) + 50  # zone ids no longer match dataset names
+    _same(m, read_case_h5(str(p)))
+
+
 def test_read_case_h5_rejects_non_case(tmp_path):
     p = tmp_path / "x.h5"
     with h5py.File(p, "w") as f:

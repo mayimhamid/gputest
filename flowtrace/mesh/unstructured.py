@@ -216,15 +216,41 @@ def compute_geometry(mesh: UnstructuredMesh, repair: bool = True) -> Geometry:
                     cell_centre=cc, cell_volume=vol, flipped_faces=flipped)
 
 
-def split_zone(mesh: UnstructuredMesh, zone: str, where, new_name: str, new_type: Optional[str] = None
+def split_zone(mesh: UnstructuredMesh, zone: str, where, new_name=None, new_type: Optional[str] = None
                ) -> UnstructuredMesh:
-    """Move the faces of ``zone`` whose centres satisfy ``where(xc) -> bool[]`` into a new zone."""
+    """Split a face zone by a rule on its face centres (Fluent: Separate Zones).
+
+    Two forms:
+
+    * ``where(xc) -> bool[]``: the selected faces move to a new zone ``new_name``
+      (type ``new_type``, default the original type);
+    * ``where(xc) -> names[]`` (labels): one zone per distinct label; ``new_name`` may
+      then be a ``{label: Fluent type}`` dict (default: the original type).
+    """
     z = mesh.zone_by_name(zone)
     if z is None:
         raise ValueError(f"unknown zone {zone!r}")
     faces = mesh.faces_of_zone(z.id)
     fc, _ = _face_geometry(mesh)
-    sel = np.asarray(where(fc[faces]), dtype=bool)
+    labels = np.asarray(where(fc[faces]))
+    if labels.dtype != bool:
+        types = new_name if isinstance(new_name, dict) else {}
+        zones = dict(mesh.zones)
+        fz = mesh.face_zone.copy()
+        nid = max(mesh.zones) + 1
+        for i, lab in enumerate(np.unique(labels)):
+            zid = z.id if i == 0 else nid
+            if i:
+                nid += 1
+            fz[faces[labels == lab]] = zid
+            zones[zid] = Zone(zid, str(lab), types.get(str(lab), z.type), "face")
+        m = UnstructuredMesh(dim=mesh.dim, nodes=mesh.nodes, face_ptr=mesh.face_ptr, face_nodes=mesh.face_nodes,
+                             owner=mesh.owner, neighbour=mesh.neighbour, face_zone=fz, n_cells=mesh.n_cells,
+                             cell_zone=mesh.cell_zone, zones=zones, name=mesh.name, periodic=list(mesh.periodic))
+        return sort_faces_by_zone(m)
+    if new_name is None:
+        raise ValueError("split_zone with a boolean rule needs new_name")
+    sel = labels
     if not sel.any():
         raise ValueError(f"no face of {zone!r} matches the split condition")
     if sel.all():
@@ -240,6 +266,87 @@ def split_zone(mesh: UnstructuredMesh, zone: str, where, new_name: str, new_type
                          owner=mesh.owner, neighbour=mesh.neighbour, face_zone=fz, n_cells=mesh.n_cells,
                          cell_zone=mesh.cell_zone, zones=zones, name=mesh.name, periodic=list(mesh.periodic))
     return sort_faces_by_zone(m)
+
+
+def match_periodic(mesh: UnstructuredMesh, zone_a: str, zone_b: str, tol: float = 1e-6):
+    """Pair the faces of two translationally periodic zones without changing the mesh.
+
+    Returns ``(faces_a, faces_b, translation)`` with centre(b) = centre(a) + translation.
+    """
+    m = make_periodic(_shallow(mesh), zone_a, zone_b, tol=tol)
+    p = m.periodic[-1]
+    return p["faces_a"], p["faces_b"], np.asarray(p["translation"], dtype=float)
+
+
+def _shallow(mesh: UnstructuredMesh) -> UnstructuredMesh:
+    """A copy that shares the arrays but has its own zone objects and periodic list."""
+    zones = {k: Zone(z.id, z.name, z.type, z.kind) for k, z in mesh.zones.items()}
+    return UnstructuredMesh(dim=mesh.dim, nodes=mesh.nodes, face_ptr=mesh.face_ptr, face_nodes=mesh.face_nodes,
+                            owner=mesh.owner, neighbour=mesh.neighbour, face_zone=mesh.face_zone,
+                            n_cells=mesh.n_cells, cell_zone=mesh.cell_zone, zones=zones, name=mesh.name,
+                            periodic=list(mesh.periodic))
+
+
+def wall_distance(cell_centres: np.ndarray, mesh: UnstructuredMesh, wall_faces: np.ndarray, k: int = 8) -> np.ndarray:
+    """Distance from every cell centre to the nearest wall face (exact for 2-D segments)."""
+    from scipy.spatial import cKDTree
+
+    nc = cell_centres.shape[0]
+    if wall_faces.size == 0:
+        return np.full(nc, 1e30)
+    fc, S = _face_geometry(mesh)
+    c = fc[wall_faces]
+    kq = min(k, wall_faces.size)
+    _, idx = cKDTree(c).query(cell_centres, k=kq)
+    idx = idx.reshape(nc, kq)
+    best = np.full(nc, np.inf)
+    if mesh.dim == 2:
+        a = mesh.nodes[mesh.face_nodes[mesh.face_ptr[wall_faces]]]
+        b = mesh.nodes[mesh.face_nodes[mesh.face_ptr[wall_faces] + 1]]
+        for j in range(kq):
+            A, B = a[idx[:, j]], b[idx[:, j]]
+            ab = B - A
+            t = np.clip(np.einsum("cd,cd->c", cell_centres - A, ab) / np.maximum(np.einsum("cd,cd->c", ab, ab), 1e-300),
+                        0, 1)
+            best = np.minimum(best, np.linalg.norm(cell_centres - (A + t[:, None] * ab), axis=1))
+        return best
+    n = S[wall_faces] / np.linalg.norm(S[wall_faces], axis=1, keepdims=True)
+    r = np.sqrt(np.linalg.norm(S[wall_faces], axis=1)) * 0.6  # ~ face "radius"
+    for j in range(kq):
+        f = idx[:, j]
+        v = cell_centres - c[f]
+        dn = np.abs(np.einsum("cd,cd->c", v, n[f]))
+        tang = np.sqrt(np.maximum(np.einsum("cd,cd->c", v, v) - dn ** 2, 0.0))
+        best = np.minimum(best, np.where(tang <= r[f], dn, np.sqrt(dn ** 2 + (tang - r[f]) ** 2)))
+    return best
+
+
+def stretch(n: int, length: float, first: Optional[float] = None, ratio: Optional[float] = None,
+            both: bool = False, start: float = 0.0) -> np.ndarray:
+    """n+1 node coordinates on [start, start+length] clustered towards the start (and the
+    end with ``both``): geometric growth from cell size ``first`` or with growth ``ratio``.
+    Uniform when neither is given."""
+    if first is None and ratio is None:
+        return start + np.linspace(0.0, length, n + 1)
+    if both:
+        half = n // 2
+        a = stretch(half, 0.5 * length, first, ratio)
+        b = 0.5 * length + (0.5 * length - stretch(n - half, 0.5 * length, first, ratio)[::-1])
+        return start + np.concatenate([a, b[1:]])
+    if ratio is None:
+        lo, hi = 1.0 + 1e-12, 10.0  # solve first (r^n - 1) / (r - 1) = length for r > 1
+        if first * n >= length:
+            return start + np.linspace(0.0, length, n + 1)
+        for _ in range(200):
+            r = 0.5 * (lo + hi)
+            if first * (r ** n - 1) / (r - 1) > length:
+                hi = r
+            else:
+                lo = r
+        ratio = 0.5 * (lo + hi)
+    h = ratio ** np.arange(n)
+    x = np.concatenate([[0.0], np.cumsum(h)])
+    return start + x / x[-1] * length
 
 
 def make_periodic(mesh: UnstructuredMesh, zone_a: str, zone_b: str, translation=None,
@@ -275,40 +382,10 @@ def make_periodic(mesh: UnstructuredMesh, zone_a: str, zone_b: str, translation=
 # Generators (used for tests, demos and for exporting FlowTrace grids to Fluent)
 # --------------------------------------------------------------------------
 
-def stretch(n: int, length: float, first: Optional[float] = None, ratio: Optional[float] = None,
-            both: bool = False, start: float = 0.0) -> np.ndarray:
-    """n+1 node coordinates on [start, start+length] clustered towards the start
-    (and the end with ``both``): geometric growth from cell size ``first`` or with a
-    given growth ``ratio``. Returns a uniform distribution when neither is given."""
-    if first is None and ratio is None:
-        return start + np.linspace(0.0, length, n + 1)
-    if both:
-        half = n // 2
-        a = stretch(half, 0.5 * length, first, ratio)
-        b = 0.5 * length + (0.5 * length - stretch(n - half, 0.5 * length, first, ratio)[::-1])
-        return start + np.concatenate([a, b[1:]])
-    if ratio is None:
-        # solve first * (r^n - 1) / (r - 1) = length for r (bisection, r > 1)
-        lo, hi = 1.0 + 1e-12, 10.0
-        if first * n >= length:
-            return start + np.linspace(0.0, length, n + 1)
-        for _ in range(200):
-            r = 0.5 * (lo + hi)
-            if first * (r ** n - 1) / (r - 1) > length:
-                hi = r
-            else:
-                lo = r
-        ratio = 0.5 * (lo + hi)
-    h = ratio ** np.arange(n)
-    x = np.concatenate([[0.0], np.cumsum(h)])
-    return start + x / x[-1] * length
-
-
 def cartesian_mesh_2d(nx: int, ny: int, lx: float = 1.0, ly: float = 1.0,
                       names=("left", "right", "bottom", "top"),
                       types=("wall", "wall", "wall", "wall"), triangulate: bool = False,
                       jitter: float = 0.0, seed: int = 0, x0: float = 0.0, y0: float = 0.0,
-<<<<<<< HEAD
                       warp: float = 0.0, xs=None, ys=None) -> UnstructuredMesh:
     """Structured quad (or triangle) mesh of a rectangle with four named boundary zones.
 
@@ -329,22 +406,10 @@ def cartesian_mesh_2d(nx: int, ny: int, lx: float = 1.0, ly: float = 1.0,
         ny, ly, y0 = ys.size - 1, float(ys[-1] - ys[0]), 0.0
     else:
         ys = y0 + np.linspace(0, ly, ny + 1)
-=======
-                      xs: Optional[np.ndarray] = None, ys: Optional[np.ndarray] = None) -> UnstructuredMesh:
-    """Structured quad (or triangle) mesh of a rectangle with four named boundary zones.
-
-    ``xs``/``ys`` give explicit node coordinates (e.g. from :func:`stretch`) and
-    override nx/lx/x0 and ny/ly/y0.
-    """
-    xs = x0 + np.linspace(0, lx, nx + 1) if xs is None else np.asarray(xs, dtype=float)
-    ys = y0 + np.linspace(0, ly, ny + 1) if ys is None else np.asarray(ys, dtype=float)
-    nx, ny = xs.size - 1, ys.size - 1
->>>>>>> 3d528151e15014be7c185d9c110063ec4634bd8d
     X, Y = np.meshgrid(xs, ys, indexing="ij")
     if jitter:
         rng = np.random.default_rng(seed)
-        hx = np.minimum(np.diff(xs)[:-1], np.diff(xs)[1:])[:, None]
-        hy = np.minimum(np.diff(ys)[:-1], np.diff(ys)[1:])[None, :]
+        hx, hy = lx / nx, ly / ny
         X[1:-1, 1:-1] += rng.uniform(-jitter, jitter, (nx - 1, ny - 1)) * hx
         Y[1:-1, 1:-1] += rng.uniform(-jitter, jitter, (nx - 1, ny - 1)) * hy
     if warp:
@@ -698,89 +763,3 @@ def sort_faces_by_zone(mesh: UnstructuredMesh) -> UnstructuredMesh:
         face_zone=fz, n_cells=mesh.n_cells, cell_zone=mesh.cell_zone, zones=zones, name=mesh.name,
         periodic=periodic,
     )
-
-
-def split_zone(mesh: UnstructuredMesh, zone_name: str, label, types: Optional[Dict[str, str]] = None) -> UnstructuredMesh:
-    """Split a face zone into several by a rule on face centres (Fluent: Separate Zones).
-
-    ``label(face_centres) -> array of new zone names``; ``types`` maps new names to
-    Fluent zone types (default: the original zone's type).
-    """
-    z = mesh.zone_by_name(zone_name)
-    if z is None or z.kind != "face":
-        raise KeyError(f"no face zone {zone_name!r}")
-    fids = mesh.faces_of_zone(z.id)
-    geo_fc = _face_geometry(mesh)[0][fids]
-    names = np.asarray(label(geo_fc))
-    zones = dict(mesh.zones)
-    del zones[z.id]
-    fz = mesh.face_zone.copy()
-    next_id = max(mesh.zones) + 1
-    for nm in np.unique(names):
-        zid = z.id if nm == np.unique(names)[0] else next_id
-        if zid == next_id:
-            next_id += 1
-        fz[fids[names == nm]] = zid
-        zones[zid] = Zone(zid, str(nm), (types or {}).get(str(nm), z.type), "face")
-    m = UnstructuredMesh(dim=mesh.dim, nodes=mesh.nodes, face_ptr=mesh.face_ptr, face_nodes=mesh.face_nodes,
-                         owner=mesh.owner, neighbour=mesh.neighbour, face_zone=fz, n_cells=mesh.n_cells,
-                         cell_zone=mesh.cell_zone, zones=zones, name=mesh.name)
-    return sort_faces_by_zone(m)
-
-
-def match_periodic(mesh: UnstructuredMesh, zone_a: str, zone_b: str, rtol: float = 1e-6):
-    """Pair the faces of two translationally periodic zones.
-
-    Returns (faces_a, faces_b, translation) with centre(b) = centre(a) + translation.
-    """
-    from scipy.spatial import cKDTree
-
-    za, zb = mesh.zone_by_name(zone_a), mesh.zone_by_name(zone_b)
-    if za is None or zb is None:
-        raise KeyError(f"periodic zones {zone_a!r}/{zone_b!r} not found")
-    fa, fb = mesh.faces_of_zone(za.id), mesh.faces_of_zone(zb.id)
-    if fa.size != fb.size:
-        raise ValueError(f"periodic zones differ in face count ({fa.size} vs {fb.size})")
-    fc = _face_geometry(mesh)[0]
-    t = fc[fb].mean(axis=0) - fc[fa].mean(axis=0)
-    lo, hi = mesh.bounding_box()
-    tol = rtol * float(np.linalg.norm(hi - lo)) + 1e-12
-    dist, idx = cKDTree(fc[fb]).query(fc[fa] + t)
-    if np.any(dist > max(tol, 1e-6 * float(np.linalg.norm(t)))) or np.unique(idx).size != fa.size:
-        raise ValueError("faces of the periodic zones do not match under a translation")
-    return fa, fb[idx], t
-
-
-def wall_distance(cell_centres: np.ndarray, mesh: UnstructuredMesh, wall_faces: np.ndarray, k: int = 8) -> np.ndarray:
-    """Distance from every cell centre to the nearest wall face (exact for 2-D segments)."""
-    from scipy.spatial import cKDTree
-
-    nc = cell_centres.shape[0]
-    if wall_faces.size == 0:
-        return np.full(nc, 1e30)
-    fc, S = _face_geometry(mesh)
-    c = fc[wall_faces]
-    kq = min(k, wall_faces.size)
-    _, idx = cKDTree(c).query(cell_centres, k=kq)
-    idx = idx.reshape(nc, kq)
-    best = np.full(nc, np.inf)
-    if mesh.dim == 2:
-        a = mesh.nodes[mesh.face_nodes[mesh.face_ptr[wall_faces]]]
-        b = mesh.nodes[mesh.face_nodes[mesh.face_ptr[wall_faces] + 1]]
-        for j in range(kq):
-            A, B = a[idx[:, j]], b[idx[:, j]]
-            ab = B - A
-            t = np.clip(np.einsum("cd,cd->c", cell_centres - A, ab) / np.maximum(np.einsum("cd,cd->c", ab, ab), 1e-300), 0, 1)
-            d = np.linalg.norm(cell_centres - (A + t[:, None] * ab), axis=1)
-            best = np.minimum(best, d)
-        return best
-    n = S[wall_faces] / np.linalg.norm(S[wall_faces], axis=1, keepdims=True)
-    r = np.sqrt(np.linalg.norm(S[wall_faces], axis=1)) * 0.6  # ~face "radius"
-    for j in range(kq):
-        f = idx[:, j]
-        v = cell_centres - c[f]
-        dn = np.abs(np.einsum("cd,cd->c", v, n[f]))
-        tang = np.sqrt(np.maximum(np.einsum("cd,cd->c", v, v) - dn ** 2, 0.0))
-        d = np.where(tang <= r[f], dn, np.sqrt(dn ** 2 + (tang - r[f]) ** 2))
-        best = np.minimum(best, d)
-    return best

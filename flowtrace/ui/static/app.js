@@ -152,7 +152,8 @@ function renderPresetParams() {
   const labels = { re: "Reynolds number", ra: "Rayleigh number", pr: "Prandtl number", n: "Cells per side", nx: "Cells in x", ny: "Cells in y",
     n_per_d: "Cells per diameter", n_per_h: "Cells per step height", length: "Channel length", aspect: "Aspect ratio",
     re_tau: "Friction Reynolds number Re_τ", yplus1: "First-cell y+", re_l: "Reynolds number per unit length",
-    tau: "Optical thickness τ", t_hot: "Hot wall T (K)", t_cold: "Cold wall T (K)", dt: "Time step", t_end: "End time" };
+    tau: "Optical thickness τ", t_hot: "Hot wall T (K)", t_cold: "Cold wall T (K)", dt: "Time step", t_end: "End time",
+    diffusivity: "Species diffusivity D" };
   for (const [k, v] of Object.entries(p.params)) {
     const l = document.createElement("label");
     l.className = "field";
@@ -163,7 +164,7 @@ function renderPresetParams() {
   if (p.kind === "unstructured") {
     $("#maxIter").value = d.max_iter; $("#uTol").value = d.tol;
     $("#algorithm").value = d.algorithm; $("#uScheme").value = d.scheme;
-    $("#relaxU").value = d.relax_u; $("#relaxP").value = d.relax_p;
+    $("#relaxU").value = d.relax_u; $("#relaxP").value = d.relax_p ?? "";
   } else {
     $("#tEnd").value = d.t_end ?? "";
     $("#maxSteps").value = d.max_steps;
@@ -287,7 +288,7 @@ function renderZoneTable(info) {
       <div class="row" style="margin-top:4px">
         <select data-k="kind" style="width:96px">${kinds.map((k) => `<option ${k === b.kind ? "selected" : ""}>${k}</option>`).join("")}</select>
         <input type="text" data-k="val" title="inlet: normal speed or u,v${dim === 3 ? ",w" : ""}; wall: wall velocity u,v${dim === 3 ? ",w" : ""}; outlet: gauge pressure" placeholder="speed / u,v / p" value="${b.kind === "inlet" ? (b.normal_speed ?? 1) : ""}">
-        <input type="text" data-k="therm" title="T=value (fixed temperature) or q=value (heat flux into the domain); e=0.8 radiation emissivity; name=value for species (e.g. co2=0.1)" placeholder="T=… q=… e=… co2=…" value="">
+        <input type="text" data-k="therm" title="T=value (fixed temperature) or q=value (heat flux into the domain)" placeholder="T=… / q=…" value="">
       </div></td></tr>`;
   }).join("");
 }
@@ -323,7 +324,7 @@ function zoneSpecs() {
 function modelSettings() {
   const vec = (txt) => txt.trim() ? txt.split(/[ ,;]+/).map(Number).filter((x) => !Number.isNaN(x)) : [0, 0, 0];
   return {
-    turbulence: $("#turbModel").value, turb_intensity: +$("#turbI").value, turb_viscosity_ratio: +$("#turbR").value,
+    turbulence: $("#uTurb").value, turb_intensity: +$("#turbI").value, turb_viscosity_ratio: +$("#turbR").value,
     turb_scheme: $("#turbScheme").value, radiation: $("#radModel").value, absorption: +$("#radA").value,
     periodic_pressure_gradient: vec($("#perG").value), unsteady: $("#unsteady").checked, dt: +$("#uDt").value,
     t_end: +$("#uTend").value, inner_iterations: +$("#uInner").value, time_scheme: $("#uTimeScheme").value,
@@ -342,17 +343,18 @@ function buildSpec() {
       kind: "unstructured", preset: $("#presetSelect").value, params: readParams(), checkpoint_seconds: +$("#ckpt").value || 0,
       field: $("#fieldSelect").value || null,
       overrides: { backend, max_iter: +$("#maxIter").value, tol: +$("#uTol").value, algorithm: $("#algorithm").value,
-        scheme: $("#uScheme").value, relax_u: +$("#relaxU").value, relax_p: +$("#relaxP").value },
+        scheme: $("#uScheme").value, relax_u: +$("#relaxU").value,
+        relax_p: $("#relaxP").value.trim() === "" ? null : +$("#relaxP").value },
     };
   }
   if (S.source === "structured") {
+    const params = {};
+    $$("#presetParams input").forEach((i) => { params[i.dataset.param] = Number.isInteger(+i.value) && !i.value.includes(".") && !/e/i.test(i.value) ? parseInt(i.value, 10) : +i.value; });
     const tEnd = $("#tEnd").value.trim(), tol = $("#steadyTol").value.trim();
-    const m = modelSettings();
     return {
-      kind: "structured", preset: $("#presetSelect").value, params: readParams(), mode: $("#mode").value, fmg: $("#fmg").checked,
+      kind: "structured", preset: $("#presetSelect").value, params, mode: $("#mode").value, fmg: $("#fmg").checked,
       checkpoint_seconds: +$("#ckpt").value || 0, field: $("#fieldSelect").value || null,
       max_iter: +$("#maxIter").value, tol: +$("#uTol").value,
-      turbulence: m.turbulence, turb_intensity: m.turb_intensity, turb_viscosity_ratio: m.turb_viscosity_ratio,
       overrides: { backend, precision, scheme: $("#scheme").value, cfl: +$("#cfl").value, poisson: $("#poisson").value,
         max_steps: +$("#maxSteps").value, t_end: tEnd === "" ? null : +tEnd, steady_tol: tol === "" ? null : +tol },
     };
@@ -364,16 +366,10 @@ function buildSpec() {
     kind: "unstructured", mesh_id: S.meshId, checkpoint_seconds: +$("#ckpt").value || 0,
     case: {
       name: S.meshInfo.name, boundaries: zoneSpecs(), density: +$("#uDensity").value, viscosity: +$("#uViscosity").value,
-<<<<<<< HEAD
-      energy: $("#uEnergy").checked || Object.keys(solids).length > 0, conductivity: +$("#uConductivity").value, cp: +$("#uCp").value,
-      turbulence: $("#uTurb").value, solids,
+      energy: $("#uEnergy").checked || Object.keys(solids).length > 0 || $("#radModel").value !== "off",
+      conductivity: +$("#uConductivity").value, cp: +$("#uCp").value, solids, ...modelSettings(),
       algorithm: $("#algorithm").value, scheme: $("#uScheme").value, relax_u: +$("#relaxU").value, relax_p: $("#relaxP").value.trim() === "" ? null : +$("#relaxP").value,
-=======
-      energy: $("#uEnergy").checked || $("#radModel").value !== "off", conductivity: +$("#uConductivity").value, cp: +$("#uCp").value,
-      algorithm: $("#algorithm").value, scheme: $("#uScheme").value, relax_u: +$("#relaxU").value, relax_p: +$("#relaxP").value,
->>>>>>> 3d528151e15014be7c185d9c110063ec4634bd8d
       max_iter: +$("#maxIter").value, tol: +$("#uTol").value, backend, precision: precision === "fp32" ? "fp32" : "fp64",
-      ...modelSettings(),
     },
   };
 }
@@ -472,13 +468,15 @@ function onFrame(ev) {
 function onResult(res) {
   const v = res.validation;
   if (v && v.checks) {
-    $("#validation").innerHTML = v.checks.map((c) => `<div class="check"><span class="badge ${c.pass ? "pass" : "check"}">${c.pass ? "PASS" : "CHECK"}</span><span>${esc(c.name)}${c.reference !== undefined && c.reference !== null ? ` <span class="muted">(ref ${fmt(c.reference, 4)})</span>` : ""}</span><span class="val">${fmt(c.value, 4)} <span class="muted">${esc(c.unit || "")}</span></span></div>`).join("");
-  }
-  if (!(v && v.checks) && res.mass_balance) {
+    $("#validation").innerHTML = v.checks.map((c) => `<div class="check"><span class="badge ${c.pass ? "pass" : "check"}">${c.pass ? "PASS" : "CHECK"}</span><span>${esc(c.name)}${c.reference !== undefined && c.reference !== null ? ` <span class="muted">(ref ${c.reference})</span>` : ""}</span><span class="val">${fmt(c.value, 4)} <span class="muted">${esc(c.unit || "")}</span></span></div>`).join("");
+  } else if (res.mass_balance) {
     const mb = res.mass_balance; const net = Object.values(mb).reduce((a, b) => a + b, 0);
     $("#validation").innerHTML = `<div class="check"><span class="badge ${Math.abs(net) < 1e-6 * Math.max(1e-30, ...Object.values(mb).map(Math.abs)) + 1e-9 ? "pass" : "check"}">MASS</span><span>Net boundary mass flow</span><span class="val">${net.toExponential(2)}</span></div>` +
       Object.entries(mb).map(([k, v]) => `<div class="check"><span class="muted">${esc(k)}</span><span class="val">${fmt(v, 5)}</span></div>`).join("") +
       `<div class="check"><span class="badge ${res.converged ? "pass" : "check"}">${res.converged ? "CONV" : "ITER"}</span><span>${res.iterations} iterations</span></div>`;
+  }
+  if (res.continuity_local_max !== undefined) {
+    $("#validation").insertAdjacentHTML("beforeend", `<div class="check"><span class="muted">Local continuity (max cell imbalance / mean face flux)</span><span class="val">${Number(res.continuity_local_max).toExponential(2)}</span></div>`);
   }
   const wr = res.wall_report;
   if (wr && Object.keys(wr).length) {

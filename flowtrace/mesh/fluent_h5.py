@@ -66,8 +66,13 @@ def _put_string(group, name: str, text: str):
     group.create_dataset(name, data=np.bytes_(text.encode("utf-8")), dtype=h5py.string_dtype("ascii", len(text) or 1))
 
 
+def _i(v) -> int:
+    """Integer attribute: Fluent 2025 writes many as one-element arrays."""
+    return int(np.asarray(v).ravel()[0])
+
+
 def _sections(group):
-    n = int(group.attrs.get("nSections", 0)) or len([k for k in group.keys() if k.isdigit()])
+    n = _i(group.attrs.get("nSections", 0)) or len([k for k in group.keys() if k.isdigit()])
     return [group[str(k)] for k in range(1, n + 1) if str(k) in group]
 
 
@@ -194,14 +199,20 @@ def read_case_h5(path: str, name: Optional[str] = None) -> UnstructuredMesh:
         if "meshes/1" not in f:
             raise ValueError(f"{path}: no /meshes/1 group (not a Fluent CFF case/mesh file)")
         m = f["meshes/1"]
-        dim = int(m.attrs["dimension"])
-        nn = int(m.attrs.get("nodeCount", 0))
+        dim = _i(m.attrs["dimension"])
+        nn = _i(m.attrs.get("nodeCount", 0))
         nz = m["nodes/zoneTopology"]
         node_blocks = []
-        for zid, lo, hi in zip(nz["id"][()], nz["minId"][()], nz["maxId"][()]):
-            ds = m[f"nodes/coords/{int(zid)}"]
-            xyz = np.asarray(ds[()], dtype=np.float64).reshape(int(hi) - int(lo) + 1, -1)
-            node_blocks.append((int(lo), xyz))
+        zone_keyed = all(f"nodes/coords/{int(z)}" in m for z in nz["id"][()])
+        if zone_keyed:  # FlowTrace's writer: one coordinate dataset per node zone id
+            for zid, lo, hi in zip(nz["id"][()], nz["minId"][()], nz["maxId"][()]):
+                ds = m[f"nodes/coords/{int(zid)}"]
+                xyz = np.asarray(ds[()], dtype=np.float64).reshape(int(hi) - int(lo) + 1, -1)
+                node_blocks.append((int(lo), xyz))
+        else:  # Fluent: numbered sections, each with its own minId/maxId
+            for ds in _sections(m["nodes/coords"]):
+                lo, hi = _i(ds.attrs["minId"]), _i(ds.attrs["maxId"])
+                node_blocks.append((lo, np.asarray(ds[()], dtype=np.float64).reshape(hi - lo + 1, -1)))
         nn = max(nn, max(lo + len(x) - 1 for lo, x in node_blocks))
         nodes = np.zeros((nn, dim))
         for lo, xyz in node_blocks:
@@ -212,12 +223,12 @@ def read_case_h5(path: str, name: Optional[str] = None) -> UnstructuredMesh:
         f_max = [int(x) for x in fz["maxId"][()]]
         f_type = [int(x) for x in fz["zoneType"][()]] if "zoneType" in fz else [3] * len(f_ids)
         f_names = _string(fz["name"]).split(";") if "name" in fz else []
-        nf = int(m.attrs.get("faceCount", max(f_max)))
+        nf = _i(m.attrs.get("faceCount", max(f_max)))
         counts = np.zeros(nf, np.int64)
         covered = np.zeros(nf, bool)
         secs = []
         for sec in _sections(m["faces/nodes"]):
-            lo, hi = int(sec.attrs["minId"]), int(sec.attrs["maxId"])
+            lo, hi = _i(sec.attrs["minId"]), _i(sec.attrs["maxId"])
             nnod = np.asarray(sec["nnodes"][()], np.int64)
             counts[lo - 1:hi] = nnod
             covered[lo - 1:hi] = True
@@ -228,7 +239,7 @@ def read_case_h5(path: str, name: Optional[str] = None) -> UnstructuredMesh:
         c1 = np.zeros(nf, np.int64)
         for grp, arr in (("faces/c0", c0), ("faces/c1", c1)):
             for sec in _sections(m[grp]):
-                lo, hi = int(sec.attrs["minId"]), int(sec.attrs["maxId"])
+                lo, hi = _i(sec.attrs["minId"]), _i(sec.attrs["maxId"])
                 arr[lo - 1:hi] = np.asarray(sec[()], np.int64)
         cz = m["cells/zoneTopology"]
         c_ids = [int(x) for x in cz["id"][()]]
@@ -308,13 +319,13 @@ def read_data_h5(path: str, n_cells: Optional[int] = None) -> Dict[str, np.ndarr
             if sv not in cells:
                 continue
             secs = _sections(cells[sv])
-            hi = max(int(s.attrs["maxId"]) for s in secs)
+            hi = max(_i(s.attrs["maxId"]) for s in secs)
             n = max(hi, n_cells or 0)
             first = np.asarray(secs[0][()])
             ncomp = first.shape[1] if first.ndim == 2 else 1
             arr = np.full((n, ncomp), np.nan)
             for s in secs:
-                lo, hi_ = int(s.attrs["minId"]), int(s.attrs["maxId"])
+                lo, hi_ = _i(s.attrs["minId"]), _i(s.attrs["maxId"])
                 d = np.asarray(s[()], dtype=np.float64).reshape(hi_ - lo + 1, -1)
                 arr[lo - 1:hi_] = d
             out[FIELD_NAMES.get(sv, sv)] = arr[:, 0] if ncomp == 1 else arr

@@ -19,15 +19,11 @@ from __future__ import annotations
 import numpy as np
 import scipy.sparse as sp
 
-from ..mesh.unstructured import UnstructuredMesh, compute_geometry, match_periodic
+from ..mesh.unstructured import UnstructuredMesh, compute_geometry
 
 
 class FVMesh:
-    """``periodic``: list of (zone_a, zone_b) translationally periodic zone pairs.
-    Their faces become interior faces whose neighbour cell is seen through the
-    translation, so every face-based operator handles them transparently."""
-
-    def __init__(self, mesh: UnstructuredMesh, backend, dtype=np.float64, periodic=None):
+    def __init__(self, mesh: UnstructuredMesh, backend, dtype=np.float64):
         self.mesh = mesh
         self.be = backend
         xp = self.xp = backend.xp
@@ -36,7 +32,6 @@ class FVMesh:
         geo = self.geometry = compute_geometry(mesh)
         nc = self.nc = mesh.n_cells
         interior = mesh.neighbour >= 0
-<<<<<<< HEAD
         boundary = ~interior
         # translational periodic pairs become interior faces: owner of the face on
         # side a, "neighbour" the owner of its image on side b, seen through the
@@ -52,6 +47,14 @@ class FVMesh:
         self.if_idx = np.concatenate([np.nonzero(interior)[0], pa])
         self.bf_idx = np.nonzero(boundary)[0]
         self.n_periodic = pa.size
+        # interior-face ranges of every periodic pair (for periodic mass-flow reports)
+        self.periodic, start = [], int(interior.sum())
+        for p in mesh.periodic:
+            n = len(p["faces_a"])
+            za, zb = mesh.zones[p["zone_a"]].name, mesh.zones[p["zone_b"]].name
+            self.periodic.append({"zones": (za, zb), "translation": np.asarray(p["translation"], dtype=float),
+                                  "faces": np.arange(start, start + n)})
+            start += n
         P = np.concatenate([mesh.owner[interior], mesh.owner[pa]])
         N = np.concatenate([mesh.neighbour[interior], mesh.owner[pb]])
         Pb = mesh.owner[boundary]
@@ -66,35 +69,6 @@ class FVMesh:
         if np.any(P == N):
             raise ValueError("a periodic face connects a cell to itself: use at least 2 cells across the period")
         self.offset = offset
-=======
-        bmask = ~interior
-        xc = geo.cell_centre
-        P = mesh.owner[interior]
-        N = mesh.neighbour[interior]
-        S = geo.face_area_vec[interior]
-        xf = geo.face_centre[interior]
-        shift = np.zeros((P.size, dim))
-        self.periodic = []
-        for za, zb in (periodic or []):
-            fa, fb, t = match_periodic(mesh, za, zb)
-            bmask[fa] = False
-            bmask[fb] = False
-            start = P.size
-            P = np.concatenate([P, mesh.owner[fa]])
-            N = np.concatenate([N, mesh.owner[fb]])
-            S = np.concatenate([S, geo.face_area_vec[fa]])
-            xf = np.concatenate([xf, geo.face_centre[fa]])
-            shift = np.concatenate([shift, np.repeat(-t[None, :], fa.size, axis=0)])
-            self.periodic.append({"zones": (za, zb), "translation": t, "faces": np.arange(start, P.size),
-                                  "area": float(np.linalg.norm(geo.face_area_vec[fa], axis=1).sum())})
-        self.if_idx = np.nonzero(interior)[0]
-        self.bf_idx = np.nonzero(bmask)[0]
-        Pb = mesh.owner[bmask]
-        self.n_if, self.n_bf = P.size, Pb.size
-        Sb = geo.face_area_vec[bmask]
-        xfb = geo.face_centre[bmask]
-        xN = xc[N] + shift  # neighbour centre as seen from the owner
->>>>>>> 3d528151e15014be7c185d9c110063ec4634bd8d
         d = xN - xc[P]
         db = xfb - xc[Pb]
         dd = np.einsum("fd,fd->f", d, d)
@@ -144,15 +118,12 @@ class FVMesh:
         self.indptr, self.indices = pat.indptr, pat.indices
 
         # boundary bookkeeping
-<<<<<<< HEAD
         self.bzone = mesh.face_zone[boundary]
-=======
-        self.bzone = mesh.face_zone[bmask]
-        self.yb_h = np.abs(np.einsum("fd,fd->f", db, Sb)) / np.sqrt(SSb)  # owner centre to face, normal
->>>>>>> 3d528151e15014be7c185d9c110063ec4634bd8d
+        self.Pb_h = Pb
+        # wall-normal distance from the owner centre to each boundary face (y for y+, wall shear)
+        self.yb_h = np.abs(np.einsum("fd,fd->f", db, Sb)) / np.sqrt(np.einsum("fd,fd->f", Sb, Sb))
         dev = lambda a, dt=self.dtype: xp.asarray(a, dtype=dt)  # noqa: E731
         self.P, self.N, self.Pb = xp.asarray(P), xp.asarray(N), xp.asarray(Pb)
-        self.Pb_h = Pb
         self.S, self.Sb = dev(S), dev(Sb)
         self.d, self.db = dev(d), dev(db)
         self.w = dev(w)
@@ -168,16 +139,12 @@ class FVMesh:
         self.xc = dev(xc)
         self.xf = dev(xf)
         self.xfb = dev(xfb)
+        self.yb = dev(self.yb_h)
         self.wl, self.wlb = dev(wl), dev(wlb)
         self.Ginv = dev(Ginv)
         self.xN = dev(xN)
         self.dP_f = dev(xf - xc[P])  # owner centre -> face
-<<<<<<< HEAD
         self.dN_f = dev(xf - xN)  # neighbour centre (through the periodic shift) -> face
-=======
-        self.dN_f = dev(xf - xN)  # neighbour centre -> face
-        self.yb = dev(self.yb_h)
->>>>>>> 3d528151e15014be7c185d9c110063ec4634bd8d
         self.slot_diag_d = xp.asarray(self.slot_diag)
         self.slot_PN_d = xp.asarray(self.slot_PN)
         self.slot_NP_d = xp.asarray(self.slot_NP)
@@ -324,8 +291,7 @@ class FVMesh:
         data += xp.bincount(self.slot_NP_d, weights=a_NP, minlength=self.nnz).astype(self.dtype)
         return self._sparse.csr_matrix((data, self.indices_d, self.indptr_d), shape=(self.nc, self.nc))
 
-    # ------------------------------------------------------------------
-    def wall_distance(self, wall_bfaces_mask: np.ndarray) -> np.ndarray:
+    def wall_distance(self, wall_bfaces_mask) -> np.ndarray:
         """Cell-centre distance to the nearest wall (host array); mask over boundary faces."""
         from ..mesh.unstructured import wall_distance
 

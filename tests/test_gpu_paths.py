@@ -117,7 +117,13 @@ def test_sst_and_p1_on_gpu_match_cpu(gpu):
 
     for make in (lambda: turbulent_channel(ny=24), lambda: radiation_slab(nx=12)):
         mesh, case, _ = make()
-        a = SimpleSolver(mesh, case, backend=backend_mod.get_backend("numpy"))
+        # the stand-in GPU runs the NumPy code path, so compare with the CPU *reference* path: the
+        # native C++ kernels round differently, and 15 unconverged SST iterations amplify that
+        # (measured 4.5e-12 -> 1.1e-5 in k); native vs reference is covered by test_native.py
+        from flowtrace import native
+
+        with native.disabled():
+            a = SimpleSolver(mesh, case, backend=backend_mod.get_backend("numpy"))
         b = SimpleSolver(mesh, case, backend=gpu)
         for _ in range(15):
             a.step()

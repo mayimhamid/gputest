@@ -4,6 +4,30 @@ All notable changes to FlowTrace. The project follows [Semantic Versioning](http
 MAJOR for incompatible API/CLI changes, MINOR for new features, PATCH for fixes.
 Until 1.0.0, minor versions may still change the Python API; the CLI stays backward compatible.
 
+## [Unreleased]
+
+### Added (merged from the GitHub branch: commits 57b2937, 3d52815)
+- Transient pressure-based solver: implicit Euler / BDF2 with inner iterations per time step
+  and Choi's Rhie-Chow correction; transient Taylor-Green on a doubly periodic mesh as a check.
+  Time terms also apply to k and omega/epsilon.
+- P-1 radiation with Marshak wall emissivity, coupled to energy; exact slab solution as a check.
+- Passive species transport (laminar + turbulent Schmidt diffusion), analytic mixing layer.
+- Built-in Fluent-style cases (`flowtrace case ...`, dashboard "Fluent-style" group): SST
+  channel, SST flat plate, P-1 slab, transient Taylor-Green, mixing layer, each with checks.
+- `wall_report()` / `wall_profile()` (Cd, Cl, y+, Cf, convective and radiative heat flow),
+  `periodic_mass_flow()`; `case.periodic` zone pairs and `periodic_pressure_gradient`.
+- Fluent journals and PyFluent scripts set SST, P-1 and transient settings.
+- Duplicated features (SST, periodic zones) keep the local, verified implementations; the
+  GitHub-side tests run unchanged against them.
+
+### Fixed
+- The run report showed the shared server log and residual history, so a report could carry
+  another job's validation lines (an external audit found Ghia errors from a CPU MAC run next to
+  a GPU SIMPLEC run). Log and residual events now carry the job id and the report filters by it;
+  it also shows the local continuity (max cell imbalance), not only the net mass balance.
+- The CFF reader failed on Fluent Meshing 2025 files (one-element array attributes; numbered
+  node-coordinate sections). It now reads the 3.19M-cell rocket mesh in 1.5 s.
+
 ## [0.3.0] - 2026-10-26
 
 ### Added

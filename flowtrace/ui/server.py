@@ -534,7 +534,9 @@ def run_report_html(app: AppState, job, image=None) -> str:
                      + "".join(f"<tr><td>{esc(p.get('stage'))}</td><td>{esc(p.get('device'))}</td>"
                                f"<td>{esc(p.get('method'))}</td><td>{esc(p.get('reason'))}</td></tr>" for p in pl)
                      + "</table>")
-    parts.append("<h2>Convergence</h2>" + _svg_residuals(list(app.hub.residuals)))
+    # only this job's events: the hub keeps the history of every run since the server started
+    mine = lambda ev: ev.get("job") == job.id  # noqa: E731
+    parts.append("<h2>Convergence</h2>" + _svg_residuals([ev for ev in app.hub.residuals if mine(ev)]))
     summary = {k: res[k] for k in ("steps", "iterations", "time", "converged") if k in res}
     if summary:
         parts.append(table(summary))
@@ -546,11 +548,20 @@ def run_report_html(app: AppState, job, image=None) -> str:
                                for c in checks) + "</table>")
     if res.get("mass_balance"):
         mb = res["mass_balance"]
-        parts.append("<h2>Mass balance</h2>" + table({**mb, "net": sum(mb.values())}))
+        extra = {}
+        if "continuity_local_max" in res:
+            extra["local continuity: max cell imbalance / mean face flux"] = res["continuity_local_max"]
+        parts.append("<h2>Mass balance</h2>" + table({**mb, "net": sum(mb.values()), **extra}))
+    if res.get("wall_report"):
+        parts.append("<h2>Wall report</h2><table><tr><th>Zone</th><th>Force (total)</th><th>Cd</th><th>Cl</th>"
+                     "<th>y+ max</th><th>Cf avg</th></tr>"
+                     + "".join(f"<tr><td>{esc(z)}</td><td>{esc([round(v, 6) for v in r['force_total']])}</td>"
+                               f"<td>{r['cd']:.5g}</td><td>{r['cl']:.5g}</td><td>{r['yplus_max']:.3g}</td>"
+                               f"<td>{r['cf_avg']:.4g}</td></tr>" for z, r in res["wall_report"].items()) + "</table>")
     if isinstance(image, str) and image.startswith("data:image/png;base64,"):
         parts.append(f"<h2>Field</h2><img alt='Field snapshot' src='{image}' style='max-width:100%'>")
-    log = [ev.get("msg", "") for ev in list(app.hub.log)[-60:]]
-    parts.append("<h2>Log (last lines)</h2><pre>" + esc("\n".join(log)) + "</pre>")
+    log = [ev.get("msg", "") for ev in list(app.hub.log) if mine(ev)][-80:]
+    parts.append(f"<h2>Log of job {esc(job.id)}</h2><pre>" + esc("\n".join(log)) + "</pre>")
     parts.append("<p class='m'>Ansys and Fluent are trademarks of ANSYS, Inc. FlowTrace is an independent project, "
                  "not affiliated with or endorsed by ANSYS, Inc.</p>")
     css = ("body{font:14px/1.5 system-ui,Segoe UI,Roboto,sans-serif;max-width:1000px;margin:24px auto;padding:0 16px;"

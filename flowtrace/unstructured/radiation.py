@@ -44,7 +44,7 @@ class P1Model:
         self.G = 4.0 * SIGMA_SB * T ** 4
 
     def _wall_conductance(self):
-        s, fv = self.s, self.s.fv
+        fv = self.s.fv
         A = self.gamma * fv.alpha_b  # cell-to-face diffusion conductance (times area)
         B = self.eps / (2.0 * (2.0 - self.eps)) * fv.Sb_mag
         return self.rad * A * B / (A + B)

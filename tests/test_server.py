@@ -26,8 +26,7 @@ def test_server_end_to_end(tmp_path):
         assert st == 200 and b"FlowTrace" in body
         sysinfo = json.loads(_get(url + "api/system")[1])
         assert "numpy" in sysinfo["backends"]
-        presets_all = json.loads(_get(url + "api/presets")[1])
-        presets = presets_all["presets"]
+        presets = json.loads(_get(url + "api/presets")[1])["presets"]
         assert {p["id"] for p in presets} >= {"cavity", "natural_convection", "cylinder"}
         est = _post(url + "api/estimate", {"kind": "structured", "preset": "cavity", "params": {"n": 64}})
         assert est["cells"] == 4096
@@ -45,7 +44,6 @@ def test_server_end_to_end(tmp_path):
         assert st == 200 and data[:2] == b"PK"
         st, data = _get(url + "api/export/ip")
         assert data.splitlines()[0] == b"3"
-<<<<<<< HEAD
         # run report: self-contained HTML with the residual chart
         req = urllib.request.Request(url + "api/report", data=json.dumps({"image": None}).encode(),
                                      headers={"Content-Type": "application/json"})
@@ -63,7 +61,8 @@ def test_server_end_to_end(tmp_path):
         # static assets for the i18n / theme front end
         st, js = _get(url + "static/i18n.js")
         assert st == 200 and "فارسی".encode() in js
-=======
+        # built-in unstructured case: validation and wall report in the result
+        presets_all = json.loads(_get(url + "api/presets")[1])
         assert {p["id"] for p in presets_all["unstructured_presets"]} >= {"turbulent_channel", "flat_plate"}
         r = _post(url + "api/run", {"kind": "unstructured", "preset": "radiation_slab", "params": {"nx": 20}})
         assert r["ok"]
@@ -76,7 +75,14 @@ def test_server_end_to_end(tmp_path):
         checks = state["job"]["result"]["validation"]["checks"]
         assert all(c["pass"] for c in checks), checks
         assert "hot" in state["job"]["result"]["wall_report"]
->>>>>>> 3d528151e15014be7c185d9c110063ec4634bd8d
+        # the report of this second job must not contain the first job's log or residuals
+        req = urllib.request.Request(url + "api/report", data=json.dumps({"image": None}).encode(),
+                                     headers={"Content-Type": "application/json"})
+        with urllib.request.build_opener(urllib.request.ProxyHandler({})).open(req, timeout=60) as r:
+            html2 = r.read().decode()
+        assert "Radiation slab" in html2 or "P-1" in html2
+        assert "Lid-driven cavity" not in html2.split("Log of job")[1]
+        assert "local continuity" in html2
     finally:
         httpd.shutdown()
 
