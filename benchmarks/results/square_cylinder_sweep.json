@@ -1,0 +1,85 @@
+{
+ "study": "sweep",
+ "environment": {
+  "date": "2026-10-26T20:00:48",
+  "flowtrace": "0.3.0",
+  "git_commit": "9bca4f832dc9522269c55bf7a84deb09538030d2",
+  "git_dirty": true,
+  "native_kernels": true
+ },
+ "rows": [
+  {
+   "mesh": "Fine",
+   "cells": 16464,
+   "Re": 10.0,
+   "backend": "numba",
+   "iterations": 2317,
+   "converged": true,
+   "seconds": 92.9,
+   "Cd": 3.685942345852971,
+   "Cd_pressure": 2.6460296220685753,
+   "Cd_viscous": 1.039912723784396,
+   "Cl": 2.681518472547051e-09,
+   "Lr_over_D": 0.6574526211632965,
+   "mass_imbalance": -2.471310563597247e-10,
+   "stability_rollbacks": 1
+  },
+  {
+   "mesh": "Fine",
+   "cells": 16464,
+   "Re": 20.0,
+   "backend": "cupy",
+   "iterations": 1659,
+   "converged": true,
+   "seconds": 67.0,
+   "Cd": 2.6073546675220447,
+   "Cd_pressure": 2.0349928537405213,
+   "Cd_viscous": 0.5723618137815236,
+   "Cl": -1.2658522429050134e-10,
+   "Lr_over_D": 1.3572938686310843,
+   "mass_imbalance": 6.957575256668254e-11,
+   "stability_rollbacks": 1
+  },
+  {
+   "mesh": "Fine",
+   "cells": 16464,
+   "Re": 30.0,
+   "backend": "cupy",
+   "iterations": 1382,
+   "converged": true,
+   "seconds": 53.2,
+   "Cd": 2.177712530961877,
+   "Cd_pressure": 1.800268849853701,
+   "Cd_viscous": 0.3774436811081757,
+   "Cl": 2.2370899360941478e-08,
+   "Lr_over_D": 2.09659705256407,
+   "mass_imbalance": 4.4465024255183984e-11,
+   "stability_rollbacks": 1
+  },
+  {
+   "mesh": "Fine",
+   "cells": 16464,
+   "Re": 40.0,
+   "backend": "cupy",
+   "iterations": 1836,
+   "converged": true,
+   "seconds": 70.4,
+   "Cd": 1.9373343837568864,
+   "Cd_pressure": 1.6715032702394532,
+   "Cd_viscous": 0.2658311135174332,
+   "Cl": 5.8622574711285434e-08,
+   "Lr_over_D": 2.8425105960889026,
+   "mass_imbalance": 8.895106873296754e-13,
+   "stability_rollbacks": 1
+  }
+ ],
+ "lr_fit": {
+  "slope": 0.07294477108709804,
+  "intercept": -0.08515574256561168,
+  "r2": 0.9997803030962538,
+  "onset_Re": 1.1674002302911253
+ },
+ "cd_exponent": -0.46631449982674034,
+ "P1": true,
+ "P2": false
+}

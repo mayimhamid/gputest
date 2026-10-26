@@ -63,6 +63,8 @@ include = ["flowtrace*"]
 
 [tool.setuptools.package-data]
 "flowtrace.ui" = ["static/*"]
+# C++/OpenMP (g++) and CUDA kernel sources, compiled on first use (see flowtrace/native)
+"flowtrace.native" = ["*.cpp", "*.h", "*.cu"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

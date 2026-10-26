@@ -40,6 +40,8 @@ jobs:
           cache: pip
       - name: Install
         run: python -m pip install -e ".[cpu,amg,h5,report]" pytest pytest-cov
+      - name: What was detected (native C++ kernels need g++/clang++ on the PATH)
+        run: python -m flowtrace probe
       - name: Test (GPU paths run against the NumPy-backed CuPy stand-in)
         run: python -m pytest -q --cov=flowtrace --cov-report=xml --cov-report=term
       - uses: actions/upload-artifact@v4
@@ -47,6 +49,21 @@ jobs:
         with:
           name: coverage
           path: coverage.xml
+
+  test-reference-path:
+    # the NumPy/SciPy path stays the reference: run everything once without the native kernels
+    needs: lint
+    runs-on: ubuntu-latest
+    env:
+      FLOWTRACE_NO_NATIVE: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: python -m pip install -e ".[cpu,amg,h5,report]" pytest
+      - run: python -m pytest -q
 
   benchmarks-quick:
     needs: test

@@ -71,7 +71,13 @@ def test_benchmark_runner_and_report(tmp_path):
     saved = json.loads((tmp_path / "results.json").read_text())
     assert saved["machine"]["flowtrace"]
     html = (tmp_path / "report.html").read_text(encoding="utf-8")
-    assert "Taylor-Green" in html and "<svg" in html
+    assert "Taylor-Green" in html
+    try:  # plots need the optional [report] extra
+        import matplotlib  # noqa: F401
+
+        assert "<svg" in html
+    except ImportError:
+        pass
     md = (tmp_path / "validation_table.md").read_text(encoding="utf-8")
     assert "`taylor_green_order`" in md and "pass" in md
     # a partial rerun merges into the existing results.json

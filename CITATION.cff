@@ -13,8 +13,8 @@ authors:
   - name: "mayimhamid"
   - name: "FlowTrace contributors"
 license: MIT
-version: 0.2.0
-date-released: "2026-10-25"
+version: 0.3.0
+date-released: "2026-10-26"
 keywords:
   - computational fluid dynamics
   - SIMPLEC

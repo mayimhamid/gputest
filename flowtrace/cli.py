@@ -50,6 +50,16 @@ def cmd_probe(args):
     if not p.gpus:
         print("GPU       none detected")
     print(f"Backends  {', '.join(available_backends())}")
+    from . import native
+
+    st = native.status()
+    print("Native    " + (f"C++/OpenMP kernels ({st.get('threads')} threads)" if st["cpu_kernels"]
+                          else f"C++ kernels off ({st['reason']})"))
+    if any(g.usable for g in p.gpus):
+        from .native import cuda as native_cuda
+
+        print("          " + ("CUDA FV kernels (NVRTC)" if native_cuda.available()
+                              else f"CUDA FV kernels off ({native_cuda.failure_reason()})"))
     print("Libraries " + ", ".join(f"{k}={v}" for k, v in p.libraries.items()))
     for n in p.notes:
         print(f"note: {n}")

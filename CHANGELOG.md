@@ -4,9 +4,24 @@ All notable changes to FlowTrace. The project follows [Semantic Versioning](http
 MAJOR for incompatible API/CLI changes, MINOR for new features, PATCH for fixes.
 Until 1.0.0, minor versions may still change the Python API; the CLI stays backward compatible.
 
-## [Unreleased]
+## [0.3.0] - 2026-10-26
 
 ### Added
+- Native kernels for the unstructured solver (`flowtrace/native/`). `fvm_kernels.cpp`
+  (C++17 + OpenMP, C API in `fvm_kernels.h`) is compiled with g++/clang++ on first use and
+  cached, statically linked on Windows. It provides parallel CSR products, fused least-squares
+  and Green-Gauss gradients, face interpolation, matrix assembly and a complete
+  Jacobi-BiCGSTAB solve. `fvm_kernels.cu` holds the same face/cell kernels for the GPU plus
+  fused BiCGSTAB updates and reductions (4 host synchronisations per iteration instead of 6);
+  it is compiled by NVRTC, so it needs no `nvcc` or host compiler. Results equal the reference
+  path (bit-identical products, gradients to 1e-13, identical Krylov iteration counts). Speed:
+  `benchmarks/native_kernels.py`, `docs/user-guide/native.md`. The reference path remains,
+  via `FLOWTRACE_NO_NATIVE=1` or when no compiler is found, and CI runs it.
+- `flowtrace probe` reports whether the C++ and CUDA kernels are active.
+- Square-cylinder validation on the author's GAMBIT four-mesh set
+  (`benchmarks/square_cylinder.py`, `docs/validation/square-cylinder.md`): mesh study and
+  GCI, a Reynolds sweep checked against published scaling laws, and a domain-size study. The
+  coarse mesh is a regression test (`tests/test_square_cylinder.py`, `tests/data/`).
 - `flowtrace batch` and `flowtrace.runtime.batch.run_batch`: solve many unstructured cases at
   once, such as mesh-independence sets or `--set key=v1,v2` parameter sweeps. One GPU worker
   takes the cases the calibrated cost model assigns to the GPU, and every other physical core
@@ -28,6 +43,10 @@ Until 1.0.0, minor versions may still change the Python API; the CLI stays backw
   15 % budget at 2 of 6 mesh sizes (×1.48 and ×1.43 the faster fixed choice).
 
 ### Fixed
+- Runs were not reproducible. pyamg draws random vectors from NumPy's global RNG for its
+  spectral-radius estimates, so two identical runs differed by ~1e-8 after 20 iterations. The
+  setup is now seeded, the caller's RNG state is restored, and runs in separate processes are
+  bit-identical.
 - SIMPLEC diverged on meshes with coherent ~45° skew, such as GAMBIT block meshes around a
   square cylinder: within 12 iterations at Re = 400, and even at Re = 4. A stability guard now
   takes snapshots while the continuity residual is healthy. If the residual becomes non-finite

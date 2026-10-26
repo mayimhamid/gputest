@@ -348,6 +348,10 @@ class SimpleSolver:
 
     def _solve(self, A, b, x0, diag, tol=0.1, maxiter=30):
         inv = 1.0 / diag
+        if self.fv.nat is not None:  # the whole Krylov loop in C++ (same algorithm and stopping rules)
+            return self.fv.nat.bicgstab_jacobi(A, b, x0, inv, tol, maxiter, relative_to_initial=True, lib=self.fv._lib)
+        if self.fv.cu is not None:
+            return self.fv.cu.bicgstab_jacobi(A, b, x0, inv, tol, maxiter)
         x, info = bicgstab(lambda v: A @ v, b, self.xp, M=lambda v: inv * v, x0=x0, tol=tol, maxiter=maxiter,
                            relative_to_initial=True)
         return x, info

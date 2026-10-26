@@ -114,3 +114,78 @@ def test_planner_measures_gpu():
     plan, solver = plan_structured(lid_driven_cavity(n=128), autotune=True, steps=2)
     assert "cupy" in plan.measured_ms_per_step
     assert plan.backend in plan.measured_ms_per_step
+
+
+def _fv_pair_gpu(mesh):
+    from flowtrace.native import cuda as native_cuda
+    from flowtrace.unstructured.fvmesh import FVMesh
+
+    if not native_cuda.available():
+        pytest.skip(f"CUDA FV kernels not compiled: {native_cuda.failure_reason()}")
+    fv = FVMesh(mesh, GPU)
+    assert fv.cu is not None
+    return fv
+
+
+@pytest.mark.parametrize("dim3", [False, True], ids=["tri2d", "hex3d"])
+def test_cuda_fv_kernels_match_cupy_reference(dim3):
+    from flowtrace.mesh.unstructured import cartesian_mesh_2d, extrude_to_3d
+
+    m = cartesian_mesh_2d(20, 16, triangulate=True, warp=0.05)
+    if dim3:
+        m = extrude_to_3d(cartesian_mesh_2d(6, 5, warp=0.05), 4, 0.5)
+    fv = _fv_pair_gpu(m)
+    cu = fv.cu
+    xp = GPU.xp
+    rng = np.random.default_rng(0)
+    phi, phib = xp.asarray(rng.standard_normal(fv.nc)), xp.asarray(rng.standard_normal(fv.n_bf))
+    g = xp.asarray(rng.standard_normal((fv.nc, fv.dim)))
+    d = xp.asarray(4 + rng.random(fv.nc))
+    a1, a2 = xp.asarray(-rng.random(fv.n_if)), xp.asarray(-rng.random(fv.n_if))
+    fast = [fv.face_interp(phi), fv.face_interp_vec(g), fv.gradient(phi, phib), fv.gradient_gg(phi, phib, g),
+            fv.matrix(d, a1, a2).toarray()]
+    fv.cu = None  # the vectorised CuPy reference
+    ref = [fv.face_interp(phi), fv.face_interp_vec(g), fv.gradient(phi, phib), fv.gradient_gg(phi, phib, g),
+           fv.matrix(d, a1, a2).toarray()]
+    fv.cu = cu
+    for a, b in zip(fast, ref):
+        a, b = GPU.to_numpy(a), GPU.to_numpy(b)
+        assert np.abs(a - b).max() <= 1e-13 * max(np.abs(b).max(), 1.0)
+
+
+def test_cuda_bicgstab_follows_the_python_algorithm():
+    from flowtrace.linalg.krylov import bicgstab
+    from flowtrace.mesh.unstructured import cartesian_mesh_2d
+
+    fv = _fv_pair_gpu(cartesian_mesh_2d(24, 24, triangulate=True, warp=0.05))
+    xp = GPU.xp
+    rng = np.random.default_rng(2)
+    d = xp.asarray(4 + rng.random(fv.nc))
+    A = fv.matrix(d, xp.asarray(-rng.random(fv.n_if)), xp.asarray(-rng.random(fv.n_if)))
+    b, x0, inv = xp.asarray(rng.standard_normal(fv.nc)), xp.asarray(rng.standard_normal(fv.nc)), 1.0 / d
+    for tol, maxiter in ((0.1, 30), (1e-10, 500)):
+        xr, ir = bicgstab(lambda v: A @ v, b, xp, M=lambda v: inv * v, x0=x0, tol=tol, maxiter=maxiter,
+                          relative_to_initial=True)
+        xc, ic = fv.cu.bicgstab_jacobi(A, b, x0, inv, tol, maxiter)
+        assert (ic.iterations, ic.converged) == (ir.iterations, ir.converged)
+        assert float(xp.abs(xc - xr).max()) <= 1e-12 * float(xp.abs(xr).max())
+
+
+def test_simplec_gpu_with_cuda_kernels_equals_cupy_reference():
+    from flowtrace.mesh.unstructured import cartesian_mesh_2d
+    from flowtrace.unstructured.case import BoundarySpec, UnstructuredCase
+    from flowtrace.unstructured.simple import SimpleSolver
+
+    m = cartesian_mesh_2d(16, 16, triangulate=True, warp=0.05)
+    _fv_pair_gpu(m)
+    c = UnstructuredCase(boundaries={"top": BoundarySpec("wall", velocity=[1.0, 0.0])}, viscosity=0.01,
+                         max_iter=40, tol=0.0)
+    a = SimpleSolver(m, c, backend=GPU)
+    b = SimpleSolver(m, c, backend=GPU)
+    b.fv.cu = None
+    for _ in range(40):
+        a.step()
+        b.step()
+    for k in ("x-velocity", "y-velocity", "pressure"):
+        fa, fb = a.fields()[k], b.fields()[k]
+        assert np.abs(fa - fb).max() <= 1e-9 * max(np.abs(fb).max(), 1.0), k

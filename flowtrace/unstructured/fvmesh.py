@@ -153,6 +153,33 @@ class FVMesh:
             self.Cb_d = self.Cb.astype(self.dtype)
             self.Cdiff_d = self.Cdiff.astype(self.dtype)
             self.indptr_d, self.indices_d = self.indptr, self.indices
+        self.nat = None  # C++/OpenMP kernels (CPU, FP64), see flowtrace.native
+        self.cu = None  # CUDA kernels (GPU, FP64)
+        dxm = xf - (w[:, None] * xc[P] + (1.0 - w)[:, None] * xN)  # face centre minus its point on the P-N line
+        if not backend.is_gpu and self.dtype == np.float64:
+            from .. import native
+
+            if native.load() is not None:
+                self._init_native(native, dxm)
+        elif backend.is_gpu and self.dtype == np.float64:
+            from ..native import cuda as native_cuda
+
+            if native_cuda.available():
+                self.cu = native_cuda.FVKernels(self, dxm)
+
+    def _init_native(self, native, dxm):
+        self.nat, self._lib = native, native.load()
+        self.Cown_d, self.Cnei_d = native.NativeCSR(self.Cown), native.NativeCSR(self.Cnei)
+        self.Cb_d, self.Cdiff_d = native.NativeCSR(self.Cb), native.NativeCSR(self.Cdiff)
+        f64, i32, i64 = native.f64, native.i32, native.i64
+        cd, cb = self.Cdiff_d, self.Cb_d
+        self._n = {
+            "iptr": cd.indptr, "iidx": cd.indices, "isgn": cd.data, "bptr": cb.indptr, "bidx": cb.indices,
+            "P": i64(self.P), "N": i64(self.N), "w": f64(self.w), "wl": f64(self.wl), "d": f64(self.d),
+            "wlb": f64(self.wlb), "db": f64(self.db), "Ginv": f64(self.Ginv), "S": f64(self.S), "Sb": f64(self.Sb),
+            "vol": f64(self.vol), "dxm": f64(dxm), "slot_diag": i32(self.slot_diag), "slot_PN": i32(self.slot_PN),
+            "slot_NP": i32(self.slot_NP), "indptr": i32(self.indptr), "indices": i32(self.indices),
+        }
 
     # ------------------------------------------------------------------
     def scatter(self, f_int=None, f_nei=None, f_bnd=None):
@@ -171,6 +198,16 @@ class FVMesh:
 
     def gradient(self, phi, phi_b):
         """Least-squares cell gradient (nc, dim) of a scalar with boundary face values."""
+        if self.nat is not None:
+            n, p = self._n, self.nat._p
+            phi, phi_b = self.nat.f64(phi), self.nat.f64(phi_b)
+            out = np.empty((self.nc, self.dim))
+            self._lib.ft_ls_gradient(self.nc, self.dim, p(n["iptr"]), p(n["iidx"]), p(n["bptr"]), p(n["bidx"]),
+                                         p(n["P"]), p(n["N"]), p(n["wl"]), p(n["d"]), p(n["wlb"]), p(n["db"]),
+                                         p(n["Ginv"]), p(phi), p(phi_b), p(out))
+            return out
+        if self.cu is not None:
+            return self.cu.ls_gradient(phi, phi_b)
         xp = self.xp
         dphi = phi[self.N] - phi[self.P]
         dphib = phi_b - phi[self.Pb]
@@ -182,6 +219,18 @@ class FVMesh:
     def gradient_gg(self, phi, phi_b, grad=None):
         """Green-Gauss cell gradient (1/V) sum_f phi_f S_f with linearly interpolated
         face values (plus a skewness correction from ``grad`` when given)."""
+        if self.nat is not None:
+            n, p, f64 = self._n, self.nat._p, self.nat.f64
+            phi, phi_b = f64(phi), f64(phi_b)
+            g = f64(grad) if grad is not None else None
+            out = np.empty((self.nc, self.dim))
+            self._lib.ft_gg_gradient(self.nc, self.dim, p(n["iptr"]), p(n["iidx"]), p(n["isgn"]), p(n["bptr"]),
+                                         p(n["bidx"]), p(n["P"]), p(n["N"]), p(n["w"]), p(n["S"]), p(n["Sb"]),
+                                         p(n["vol"]), p(n["dxm"]), p(phi), p(phi_b), p(g) if g is not None else None,
+                                         p(out))
+            return out
+        if self.cu is not None:
+            return self.cu.gg_gradient(phi, phi_b, grad)
         xp = self.xp
         pf = self.face_interp(phi)
         if grad is not None:
@@ -191,14 +240,38 @@ class FVMesh:
         s = self.Cdiff_d @ (pf[:, None] * self.S) + self.Cb_d @ (phi_b[:, None] * self.Sb)
         return s / self.vol[:, None]
 
+    def _interp_native(self, a, k):
+        n, p = self._n, self.nat._p
+        a = self.nat.f64(a)
+        out = np.empty((self.n_if,) if k == 1 else (self.n_if, k))
+        self._lib.ft_face_interp(self.n_if, k, p(n["w"]), p(n["P"]), p(n["N"]), p(a), p(out))
+        return out
+
     def face_interp(self, phi):
+        if self.nat is not None and phi.dtype == np.float64:
+            return self._interp_native(phi, 1)
+        if self.cu is not None:
+            return self.cu.face_interp(phi, 1)
         return self.w * phi[self.P] + (1.0 - self.w) * phi[self.N]
 
     def face_interp_vec(self, g):
+        if self.nat is not None and g.dtype == np.float64:
+            return self._interp_native(g, g.shape[1])
+        if self.cu is not None:
+            return self.cu.face_interp(g, g.shape[1])
         return self.w[:, None] * g[self.P] + (1.0 - self.w)[:, None] * g[self.N]
 
     def matrix(self, diag, a_PN, a_NP):
         """CSR matrix with the given diagonal and off-diagonal face coefficients."""
+        if self.nat is not None:
+            n, p, f64 = self._n, self.nat._p, self.nat.f64
+            diag, a_PN, a_NP = f64(diag), f64(a_PN), f64(a_NP)
+            data = np.empty(self.nnz)
+            self._lib.ft_assemble(self.nnz, self.nc, self.n_if, p(n["slot_diag"]), p(n["slot_PN"]),
+                                      p(n["slot_NP"]), p(diag), p(a_PN), p(a_NP), p(data))
+            return self.nat.csr_from_parts(data, n["indices"], n["indptr"], (self.nc, self.nc))
+        if self.cu is not None:
+            return self.cu.matrix(diag, a_PN, a_NP)
         xp = self.xp
         data = xp.zeros(self.nnz, dtype=self.dtype)
         data[self.slot_diag_d] = diag

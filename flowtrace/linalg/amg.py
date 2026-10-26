@@ -148,11 +148,21 @@ class SmoothedAggregationAMG:
 
 def make_amg(A, backend, singular=False):
     """Return a preconditioner callable for SPD (or singular-consistent) ``A``."""
+    A = getattr(A, "csr", A)  # flowtrace.native.NativeCSR wraps a SciPy matrix
     if not backend.is_gpu:
         try:
             import pyamg  # type: ignore
 
-            ml = pyamg.smoothed_aggregation_solver(sp.csr_matrix(A), max_coarse=300)
+            # pyamg estimates spectral radii from random vectors drawn from NumPy's global
+            # RNG, so the preconditioner (and every iterate) differed from run to run
+            # (measured ~6e-8 in u after 20 iterations). Seed it for reproducible runs and
+            # leave the caller's global RNG state untouched.
+            state = np.random.get_state()
+            np.random.seed(20261026)
+            try:
+                ml = pyamg.smoothed_aggregation_solver(sp.csr_matrix(A), max_coarse=300)
+            finally:
+                np.random.set_state(state)
             M = ml.aspreconditioner(cycle="V")
             M.n_levels = len(ml.levels)
             return M

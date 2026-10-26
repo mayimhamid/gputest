@@ -27,6 +27,19 @@ Double-click `start_flowtrace.bat`. On the first run it:
 
 Later starts only reinstall when the FlowTrace version or the GPU situation changes.
 
+## Native kernels (optional, recommended)
+
+With a C++ compiler on the `PATH` (g++ or clang++; on Windows, MSYS2's UCRT64 g++), FlowTrace
+compiles its C++/OpenMP kernels for the unstructured solver the first time they are needed,
+in a few seconds, and caches them in `~/.flowtrace/native/`. On an NVIDIA GPU the CUDA
+kernels are compiled by NVRTC, with no compiler required. Without a compiler, the same solver
+runs on NumPy/SciPy and gives the same results. See [Native kernels](user-guide/native.md).
+
+```bash
+pacman -S mingw-w64-ucrt-x86_64-gcc        # Windows, from an MSYS2 shell (then add ucrt64in to PATH)
+sudo apt install g++                       # Debian/Ubuntu
+```
+
 ## GPU notes
 
 * CuPy wheels exist for specific Python versions. On a very new Python (for example 3.15 at the

@@ -1,0 +1,7 @@
+# Source distribution: everything needed to run the test suite from the unpacked sdist
+include CHANGELOG.md CITATION.cff CODE_OF_CONDUCT.md CONTRIBUTING.md LICENSE README.md README.fa.md
+recursive-include flowtrace/native *.cpp *.h *.cu
+recursive-include flowtrace/ui/static *
+recursive-include tests *.py
+recursive-include tests/data *.msh *.md
+recursive-include examples *.msh *.md

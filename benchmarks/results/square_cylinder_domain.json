@@ -1,0 +1,80 @@
+{
+ "study": "domain",
+ "environment": {
+  "date": "2026-10-26T20:19:17",
+  "flowtrace": "0.3.0",
+  "git_commit": "9bca4f832dc9522269c55bf7a84deb09538030d2",
+  "git_dirty": true,
+  "native_kernels": true
+ },
+ "rows": [
+  {
+   "domain": "user-like",
+   "blockage": 0.08333333333333333,
+   "cells": 38046,
+   "Re": 10.0,
+   "backend": "cupy",
+   "iterations": 6748,
+   "converged": true,
+   "seconds": 295.2,
+   "Cd": 3.6938145735887096,
+   "Cd_pressure": 2.63094138173694,
+   "Cd_viscous": 1.0628731918517695,
+   "Cl": 2.1528476479813763e-08,
+   "Lr_over_D": 0.6457871817916963,
+   "mass_imbalance": -1.7163307812021838e-11,
+   "stability_rollbacks": 0
+  },
+  {
+   "domain": "user-like",
+   "blockage": 0.08333333333333333,
+   "cells": 38046,
+   "Re": 40.0,
+   "backend": "cupy",
+   "iterations": 3377,
+   "converged": true,
+   "seconds": 89.6,
+   "Cd": 1.9356596154182273,
+   "Cd_pressure": 1.6586477586866517,
+   "Cd_viscous": 0.2770118567315757,
+   "Cl": 4.507515547008895e-07,
+   "Lr_over_D": 2.7599552141533557,
+   "mass_imbalance": -2.446019683096286e-10,
+   "stability_rollbacks": 0
+  },
+  {
+   "domain": "large",
+   "blockage": 0.025,
+   "cells": 64028,
+   "Re": 10.0,
+   "backend": "cupy",
+   "iterations": 12000,
+   "converged": false,
+   "seconds": 452.6,
+   "Cd": 3.1117471466093862,
+   "Cd_pressure": 2.1955897255816565,
+   "Cd_viscous": 0.9161574210277297,
+   "Cl": -2.0613527663146738e-07,
+   "Lr_over_D": 0.6219247620556372,
+   "mass_imbalance": 3.1049676607608488e-09,
+   "stability_rollbacks": 0
+  },
+  {
+   "domain": "large",
+   "blockage": 0.025,
+   "cells": 64028,
+   "Re": 40.0,
+   "backend": "cupy",
+   "iterations": 12000,
+   "converged": false,
+   "seconds": 438.2,
+   "Cd": 1.6707575591550388,
+   "Cd_pressure": 1.4185471729241195,
+   "Cd_viscous": 0.25221038623091935,
+   "Cl": -1.8287928569041994e-05,
+   "Lr_over_D": 2.833622821116474,
+   "mass_imbalance": 9.847706650134569e-10,
+   "stability_rollbacks": 0
+  }
+ ]
+}

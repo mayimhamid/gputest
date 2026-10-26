@@ -7,7 +7,7 @@
 ![Python](https://img.shields.io/badge/python-3.9%E2%80%933.13-3776AB?logo=python&logoColor=white)
 ![License](https://img.shields.io/badge/license-MIT-green)
 ![Backends](https://img.shields.io/badge/backends-NumPy%20%7C%20Numba%20%7C%20CuPy%2FCUDA-blue)
-![Tests](https://img.shields.io/badge/tests-150%20passing-brightgreen)
+![Tests](https://img.shields.io/badge/tests-168%20passing-brightgreen)
 ![Benchmarks](https://img.shields.io/badge/validation-68%2F70%20checks%20pass-yellowgreen)
 
 [English](README.md) · [فارسی](README.fa.md) · [Documentation](docs/index.md) · [Validation report](docs/validation/index.md) · [Changelog](CHANGELOG.md)
@@ -205,14 +205,14 @@ Run `flowtrace gpu-report` on your own machine: these numbers do not transfer to
 | Zones | Conjugate heat transfer (solid zones, volumetric sources), moving reference frames, rotating walls, translational periodicity |
 | Fluent files | `.msh`/`.cas` (ASCII, binary, gzip), CFF `.cas.h5`/`.msh.h5`/`.dat.h5`, `.ip`, `.prof`, journals, PyFluent scripts |
 | Mesh quality | Orthogonal quality, equiangle skewness, aspect ratio, non-orthogonality, volume ratio (Fluent-style report) |
-| Hardware | NumPy, Numba JIT kernels, CuPy + fused CUDA C++ kernels (NVRTC); measured placement; FP32 on consumer GPUs |
+| Hardware | NumPy, Numba JIT kernels, CuPy + fused CUDA C++ kernels (NVRTC); C++/OpenMP kernels for the unstructured solver (g++, built on first use) and their CUDA counterparts (`.cu`); measured placement; `flowtrace batch` runs many cases on all cores and the GPU at once; FP32 on consumer GPUs |
 | Dashboard | Offline web UI: live residuals and fields, execution plan, saved projects, HTML run reports, English/Persian (RTL), light/dark, keyboard and screen-reader friendly |
 | V&V tooling | `flowtrace benchmark` (JSON + HTML/PDF/Markdown), MMS, GCI, warm-start study, GPU log |
 
 ## Documentation
 
 * [Installation](docs/install.md) · [Command line](docs/user-guide/cli.md) · [Dashboard](docs/user-guide/dashboard.md) · [Python API](docs/user-guide/python-api.md)
-* [Ansys Fluent workflow](docs/user-guide/fluent.md) · [GPU and the planner](docs/user-guide/gpu.md)
+* [Ansys Fluent workflow](docs/user-guide/fluent.md) · [GPU and the planner](docs/user-guide/gpu.md) · [Native kernels (C++/CUDA)](docs/user-guide/native.md)
 * Theory: [MAC solver](docs/theory/mac.md) · [SIMPLEC](docs/theory/simplec.md) · [turbulence](docs/theory/turbulence.md) · [CHT, MRF, periodic](docs/theory/zones.md) · [verification](docs/theory/verification.md)
 * [Tutorials (Jupyter)](docs/tutorials/) · [Compressible-flow design proposal](docs/design/compressible-flow.md)
 

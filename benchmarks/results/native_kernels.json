@@ -1,0 +1,381 @@
+{
+ "experiment": "native_kernels",
+ "date": "2026-10-26T19:53:29",
+ "flowtrace": "0.3.0",
+ "git_commit": "9bca4f832dc9522269c55bf7a84deb09538030d2",
+ "git_dirty": true,
+ "python": "3.13.17",
+ "os": "Windows-11-10.0.26300-SP0",
+ "cpu": "AMD64 Family 25 Model 116 Stepping 1, AuthenticAMD",
+ "logical_cores": 16,
+ "native": {
+  "cpu_kernels": true,
+  "reason": null,
+  "threads": 16
+ },
+ "rounds": 3,
+ "rows": [
+  {
+   "case": "cavity64",
+   "cells": 4096,
+   "backend": "numpy",
+   "kernels": "C++/OpenMP",
+   "ref_ms": 4.6255500000143,
+   "native_ms": 4.767750000041815,
+   "speedup": 0.9701746106598987,
+   "ref_ms_rounds": [
+    4.624949999993078,
+    4.6255500000143,
+    4.6391000000767235
+   ],
+   "native_ms_rounds": [
+    4.922599999986232,
+    4.767750000041815,
+    4.635199999938777
+   ],
+   "ref_stages": {
+    "gradients": 1.1487166666825033,
+    "momentum": 1.6134883333203713,
+    "assembly": 0.7426599999992808,
+    "pressure": 2.796983333322108,
+    "correct+energy": 0.24282500000936125
+   },
+   "native_stages": {
+    "gradients": 0.5128400000027492,
+    "momentum": 2.250466666672916,
+    "assembly": 0.8607316666484621,
+    "pressure": 3.077183333338477,
+    "correct+energy": 0.20672166666220923
+   },
+   "max_rel_du": 1.3122009409731374e-15,
+   "N1": true,
+   "N2": true
+  },
+  {
+   "case": "cavity64",
+   "cells": 4096,
+   "backend": "cupy",
+   "kernels": "CUDA",
+   "ref_ms": 17.252450000000863,
+   "native_ms": 11.524650000069414,
+   "speedup": 1.4970042474085503,
+   "ref_ms_rounds": [
+    17.252450000000863,
+    16.761400000063986,
+    17.83575000001747
+   ],
+   "native_ms_rounds": [
+    11.072800000079042,
+    11.524650000069414,
+    12.230299999941963
+   ],
+   "ref_stages": {
+    "gradients": 4.654519999993075,
+    "momentum": 6.971869999999096,
+    "assembly": 2.248263333323545,
+    "pressure": 8.460950000009385,
+    "correct+energy": 0.9645950000049197
+   },
+   "native_stages": {
+    "gradients": 0.6818633333182333,
+    "momentum": 4.99951833336354,
+    "assembly": 1.4891433333104942,
+    "pressure": 9.174738333338913,
+    "correct+energy": 0.3315550000024814
+   },
+   "max_rel_du": 1.7893674215048313e-15,
+   "N1": true,
+   "N2": true
+  },
+  {
+   "case": "cavity128",
+   "cells": 16384,
+   "backend": "numpy",
+   "kernels": "C++/OpenMP",
+   "ref_ms": 22.133100000019112,
+   "native_ms": 16.668600000116385,
+   "speedup": 1.3278319714831823,
+   "ref_ms_rounds": [
+    22.086250000029395,
+    23.01390000002357,
+    22.133100000019112
+   ],
+   "native_ms_rounds": [
+    17.267100000026403,
+    16.422300000044743,
+    16.668600000116385
+   ],
+   "ref_stages": {
+    "gradients": 4.776279999998678,
+    "momentum": 8.033860000004248,
+    "assembly": 3.0885216666585316,
+    "pressure": 9.653611666677383,
+    "correct+energy": 1.1193083333182585
+   },
+   "native_stages": {
+    "gradients": 0.9917133333450087,
+    "momentum": 8.103268333347083,
+    "assembly": 2.150798333320836,
+    "pressure": 10.088361666661664,
+    "correct+energy": 0.5518850000081935
+   },
+   "max_rel_du": 2.123644042986919e-15,
+   "N1": true,
+   "N2": true
+  },
+  {
+   "case": "cavity128",
+   "cells": 16384,
+   "backend": "cupy",
+   "kernels": "CUDA",
+   "ref_ms": 16.984999999976935,
+   "native_ms": 11.388449999913064,
+   "speedup": 1.4914233280302933,
+   "ref_ms_rounds": [
+    17.44470000005549,
+    16.984999999976935,
+    16.886150000004818
+   ],
+   "native_ms_rounds": [
+    11.388449999913064,
+    11.691900000073474,
+    11.307049999913943
+   ],
+   "ref_stages": {
+    "gradients": 4.508383333351655,
+    "momentum": 6.727866666672829,
+    "assembly": 2.192529999990711,
+    "pressure": 10.297286666669455,
+    "correct+energy": 0.9420466666673141
+   },
+   "native_stages": {
+    "gradients": 0.7009016666681115,
+    "momentum": 5.029504999977992,
+    "assembly": 1.4690800000153104,
+    "pressure": 10.863896666671735,
+    "correct+energy": 0.32698499999241903
+   },
+   "max_rel_du": 2.7135470802408343e-15,
+   "N1": true,
+   "N2": true
+  },
+  {
+   "case": "cavity256",
+   "cells": 65536,
+   "backend": "numpy",
+   "kernels": "C++/OpenMP",
+   "ref_ms": 163.70504999997593,
+   "native_ms": 86.5560000000869,
+   "speedup": 1.8913194925806596,
+   "ref_ms_rounds": [
+    156.45084999994197,
+    163.70504999997593,
+    182.47474999998303
+   ],
+   "native_ms_rounds": [
+    84.6521500000108,
+    86.5560000000869,
+    93.45839999991767
+   ],
+   "ref_stages": {
+    "gradients": 35.4024499999961,
+    "momentum": 53.687474999992446,
+    "assembly": 24.620740000019243,
+    "pressure": 38.13404500000009,
+    "correct+energy": 8.241979999994934
+   },
+   "native_stages": {
+    "gradients": 2.5114049999880685,
+    "momentum": 37.973121666645206,
+    "assembly": 10.834028333359432,
+    "pressure": 37.24283166666282,
+    "correct+energy": 2.917226666662979
+   },
+   "max_rel_du": 1.9948274092625683e-15,
+   "N1": true,
+   "N2": true
+  },
+  {
+   "case": "cavity256",
+   "cells": 65536,
+   "backend": "cupy",
+   "kernels": "CUDA",
+   "ref_ms": 18.728600000031292,
+   "native_ms": 12.00254999992012,
+   "speedup": 1.560385084849131,
+   "ref_ms_rounds": [
+    18.762200000082885,
+    18.728600000031292,
+    18.38315000009061
+   ],
+   "native_ms_rounds": [
+    12.52030000000559,
+    12.00254999992012,
+    11.981250000076216
+   ],
+   "ref_stages": {
+    "gradients": 5.419063333321598,
+    "momentum": 7.9989050000032575,
+    "assembly": 2.820503333346854,
+    "pressure": 19.950296666657625,
+    "correct+energy": 1.1816349999927904
+   },
+   "native_stages": {
+    "gradients": 0.7928433333328636,
+    "momentum": 5.71793000000298,
+    "assembly": 1.8511066666443792,
+    "pressure": 21.473443333347102,
+    "correct+energy": 0.3810766666674681
+   },
+   "max_rel_du": 2.3468592550660448e-15,
+   "N1": true,
+   "N2": true
+  },
+  {
+   "case": "cavity512",
+   "cells": 262144,
+   "backend": "numpy",
+   "kernels": "C++/OpenMP",
+   "ref_ms": 730.7473500000015,
+   "native_ms": 342.84009999987575,
+   "speedup": 2.131452388446586,
+   "ref_ms_rounds": [
+    743.4195499999987,
+    699.8389999999972,
+    730.7473500000015
+   ],
+   "native_ms_rounds": [
+    342.84009999987575,
+    366.33289999997487,
+    339.6604000000707
+   ],
+   "ref_stages": {
+    "gradients": 181.36597000000165,
+    "momentum": 282.2284233333373,
+    "assembly": 131.6987600000099,
+    "pressure": 180.20592166665588,
+    "correct+energy": 43.48015166665391
+   },
+   "native_stages": {
+    "gradients": 9.495781666684403,
+    "momentum": 174.18686333331834,
+    "assembly": 46.9593049999844,
+    "pressure": 153.839391666664,
+    "correct+energy": 12.076311666680795
+   },
+   "max_rel_du": 2.005483940718496e-09,
+   "N1": true,
+   "N2": true
+  },
+  {
+   "case": "cavity512",
+   "cells": 262144,
+   "backend": "cupy",
+   "kernels": "CUDA",
+   "ref_ms": 43.63924999995561,
+   "native_ms": 28.156549999948766,
+   "speedup": 1.5498791577815825,
+   "ref_ms_rounds": [
+    44.234350000010636,
+    41.60994999995182,
+    43.63924999995561
+   ],
+   "native_ms_rounds": [
+    28.858750000040345,
+    26.072700000099758,
+    28.156549999948766
+   ],
+   "ref_stages": {
+    "gradients": 7.198341666651231,
+    "momentum": 14.319868333332883,
+    "assembly": 4.450488333350222,
+    "pressure": 43.70142999997597,
+    "correct+energy": 1.820860000009361
+   },
+   "native_stages": {
+    "gradients": 1.2128166666419322,
+    "momentum": 9.687138333352626,
+    "assembly": 3.566826666652408,
+    "pressure": 41.06311500000478,
+    "correct+energy": 0.6001933333209308
+   },
+   "max_rel_du": 2.69181660304152e-15,
+   "N1": true,
+   "N2": true
+  },
+  {
+   "case": "SquareCylinder-Finest",
+   "cells": 22984,
+   "backend": "numpy",
+   "kernels": "C++/OpenMP",
+   "ref_ms": 33.73050000004696,
+   "native_ms": 24.870350000128383,
+   "speedup": 1.3562535308056718,
+   "ref_ms_rounds": [
+    33.73050000004696,
+    33.22634999994989,
+    43.13755000009678
+   ],
+   "native_ms_rounds": [
+    24.870350000128383,
+    24.757550000003903,
+    27.854199999978846
+   ],
+   "ref_stages": {
+    "gradients": 7.27961166668365,
+    "momentum": 13.125096666669833,
+    "assembly": 4.783994999998716,
+    "pressure": 18.610661666658263,
+    "correct+energy": 1.5904766666797816
+   },
+   "native_stages": {
+    "gradients": 1.099160000012489,
+    "momentum": 11.194698333334449,
+    "assembly": 2.4053433333278917,
+    "pressure": 16.543048333331473,
+    "correct+energy": 0.6417633333398953
+   },
+   "max_rel_du": 1.6915406187174702e-14,
+   "N1": true,
+   "N2": true
+  },
+  {
+   "case": "SquareCylinder-Finest",
+   "cells": 22984,
+   "backend": "cupy",
+   "kernels": "CUDA",
+   "ref_ms": 19.74560000007841,
+   "native_ms": 13.255250000042906,
+   "speedup": 1.4896437260718958,
+   "ref_ms_rounds": [
+    22.27814999992006,
+    19.74560000007841,
+    19.7177999999667
+   ],
+   "native_ms_rounds": [
+    13.255250000042906,
+    13.062699999977667,
+    13.33705000001828
+   ],
+   "ref_stages": {
+    "gradients": 5.547863333341259,
+    "momentum": 10.31625499998654,
+    "assembly": 2.9040566666594714,
+    "pressure": 23.860205000001617,
+    "correct+energy": 1.2364716666714533
+   },
+   "native_stages": {
+    "gradients": 0.7298433333251827,
+    "momentum": 5.8630716666546805,
+    "assembly": 1.5719183333203546,
+    "pressure": 20.91819333333736,
+    "correct+energy": 0.2916450000157056
+   },
+   "max_rel_du": 2.9559467265419986e-14,
+   "N1": true,
+   "N2": true
+  }
+ ],
+ "passed": true,
+ "reproduce": "python benchmarks/native_kernels.py --sizes 64,128,256,512 --mesh SquareCylinder-Finest.msh"
+}

@@ -1,0 +1,182 @@
+{
+ "study": "meshes",
+ "environment": {
+  "date": "2026-10-26T19:53:30",
+  "flowtrace": "0.3.0",
+  "git_commit": "9bca4f832dc9522269c55bf7a84deb09538030d2",
+  "git_dirty": true,
+  "native_kernels": true
+ },
+ "rows": [
+  {
+   "mesh": "Coarse",
+   "sides": "wall",
+   "cells": 5824,
+   "Re": 40.0,
+   "backend": "numba",
+   "iterations": 311,
+   "converged": true,
+   "seconds": 7.5,
+   "Cd": 2.122759152401878,
+   "Cd_pressure": 1.7822506899167572,
+   "Cd_viscous": 0.34050846248512084,
+   "Cl": 3.828720761061503e-09,
+   "Lr_over_D": 2.348522165444372,
+   "mass_imbalance": 9.417059724607194e-12,
+   "stability_rollbacks": 0
+  },
+  {
+   "mesh": "Medium",
+   "sides": "wall",
+   "cells": 10904,
+   "Re": 40.0,
+   "backend": "cupy",
+   "iterations": 990,
+   "converged": true,
+   "seconds": 31.9,
+   "Cd": 2.1476115382725123,
+   "Cd_pressure": 1.8427785556214737,
+   "Cd_viscous": 0.3048329826510384,
+   "Cl": 1.2031088151560237e-05,
+   "Lr_over_D": 2.3377133355102195,
+   "mass_imbalance": 8.093496243570067e-11,
+   "stability_rollbacks": 1
+  },
+  {
+   "mesh": "Fine",
+   "sides": "wall",
+   "cells": 16464,
+   "Re": 40.0,
+   "backend": "numba",
+   "iterations": 1111,
+   "converged": true,
+   "seconds": 53.0,
+   "Cd": 2.1551618375098975,
+   "Cd_pressure": 1.854265493988211,
+   "Cd_viscous": 0.3008963435216864,
+   "Cl": -1.648260461593518e-07,
+   "Lr_over_D": 2.3310751554183837,
+   "mass_imbalance": 4.4015961246183605e-10,
+   "stability_rollbacks": 1
+  },
+  {
+   "mesh": "Finest",
+   "sides": "wall",
+   "cells": 22984,
+   "Re": 40.0,
+   "backend": "cupy",
+   "iterations": 1665,
+   "converged": true,
+   "seconds": 69.0,
+   "Cd": 2.1611694476109764,
+   "Cd_pressure": 1.8627574386026857,
+   "Cd_viscous": 0.29841200900829057,
+   "Cl": 7.281516615148054e-08,
+   "Lr_over_D": 2.3239235425071563,
+   "mass_imbalance": -1.4766262286987818e-11,
+   "stability_rollbacks": 1
+  },
+  {
+   "mesh": "Coarse",
+   "sides": "symmetry",
+   "cells": 5824,
+   "Re": 40.0,
+   "backend": "numba",
+   "iterations": 311,
+   "converged": true,
+   "seconds": 6.9,
+   "Cd": 1.9065376704471229,
+   "Cd_pressure": 1.6054816608513027,
+   "Cd_viscous": 0.3010560095958201,
+   "Cl": 2.9273435887995636e-08,
+   "Lr_over_D": 2.897671023135989,
+   "mass_imbalance": 9.7497565576532e-11,
+   "stability_rollbacks": 0
+  },
+  {
+   "mesh": "Medium",
+   "sides": "symmetry",
+   "cells": 10904,
+   "Re": 40.0,
+   "backend": "cupy",
+   "iterations": 941,
+   "converged": true,
+   "seconds": 29.8,
+   "Cd": 1.9302242083410888,
+   "Cd_pressure": 1.6608535369725317,
+   "Cd_viscous": 0.2693706713685571,
+   "Cl": 1.6692261999675165e-06,
+   "Lr_over_D": 2.856732723291975,
+   "mass_imbalance": 8.047592222245231e-11,
+   "stability_rollbacks": 1
+  },
+  {
+   "mesh": "Fine",
+   "sides": "symmetry",
+   "cells": 16464,
+   "Re": 40.0,
+   "backend": "numba",
+   "iterations": 1680,
+   "converged": true,
+   "seconds": 69.4,
+   "Cd": 1.9373343791800428,
+   "Cd_pressure": 1.6715032698194392,
+   "Cd_viscous": 0.2658311093606036,
+   "Cl": 6.126506026186409e-08,
+   "Lr_over_D": 2.84251062989741,
+   "mass_imbalance": -2.3979337034537213e-11,
+   "stability_rollbacks": 1
+  },
+  {
+   "mesh": "Finest",
+   "sides": "symmetry",
+   "cells": 22984,
+   "Re": 40.0,
+   "backend": "cupy",
+   "iterations": 3964,
+   "converged": true,
+   "seconds": 168.2,
+   "Cd": 1.9429107446625582,
+   "Cd_pressure": 1.6793562515199947,
+   "Cd_viscous": 0.2635544931425636,
+   "Cl": 4.9799263998888494e-08,
+   "Lr_over_D": 2.8310783114026736,
+   "mass_imbalance": -5.1262549760622284e-11,
+   "stability_rollbacks": 1
+  }
+ ],
+ "gci": {
+  "wall": {
+   "Cd": {
+    "observed_order": 0.5047626997041912,
+    "extrapolated": 2.1996098545520533,
+    "gci_fine": 0.022233568371726322,
+    "asymptotic_ratio": 0.7479475983878042,
+    "oscillatory": false
+   },
+   "Lr_over_D": {
+    "observed_order": 1.8776368027634782,
+    "extrapolated": 2.3139392395048333,
+    "gci_fine": 0.005370391290687449,
+    "asymptotic_ratio": 0.3394852111989047,
+    "oscillatory": false
+   }
+  },
+  "symmetry": {
+   "Cd": {
+    "observed_order": 0.4407984062273545,
+    "extrapolated": 1.9841557217373178,
+    "gci_fine": 0.026535558303479534,
+    "asymptotic_ratio": 0.7759869328342015,
+    "oscillatory": false
+   },
+   "Lr_over_D": {
+    "observed_order": 0.5500893599955359,
+    "extrapolated": 2.7644020167578542,
+    "gci_fine": 0.029439442904259115,
+    "asymptotic_ratio": 0.7286937769847545,
+    "oscillatory": false
+   }
+  }
+ }
+}
