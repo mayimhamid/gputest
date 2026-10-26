@@ -131,3 +131,26 @@ def test_sst_and_p1_on_gpu_match_cpu(gpu):
         fa, fb = a.fields(), b.fields()
         for k in fa:
             assert np.allclose(fa[k], fb[k], rtol=1e-6, atol=1e-9), k
+
+
+def test_compressible_solver_on_gpu_matches_cpu(gpu):
+    """Density-based solver (array path, SST on) through the CuPy branches vs the NumPy run."""
+    from flowtrace.compressible import CompBC, CompressibleCase, CompressibleSolver
+    from flowtrace.mesh.unstructured import cartesian_mesh_2d
+
+    m = cartesian_mesh_2d(16, 10, 1.0, 0.2, names=("in", "out", "wall", "top"))
+    U = 100.0
+    bc = {"in": CompBC(kind="velocity-inlet", velocity=[U, 0], T=300.0),
+          "out": CompBC(kind="pressure-outlet", p=101325.0), "top": CompBC(kind="symmetry"),
+          "wall": CompBC(kind="wall")}
+    out = []
+    for be in (gpu, backend_mod.get_backend("numpy")):
+        case = CompressibleCase(boundaries=bc, turbulence="k-omega-sst", init_velocity=[U, 0, 0], max_iter=30)
+        s = CompressibleSolver(m, case, backend=be)
+        if be is gpu:
+            assert s.flux_kernel == "array"  # the fake CuPy never loads the real CUDA kernels
+        for _ in range(30):
+            s.step()
+        out.append(s.fields())
+    for k in ("pressure", "x-velocity", "viscosity-turb"):
+        assert np.allclose(out[0][k], out[1][k], rtol=1e-9, atol=1e-12)

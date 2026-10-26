@@ -59,3 +59,22 @@ def test_batch_reports_a_failing_case_without_stopping():
     res = run_batch(jobs, cpu_workers=2, use_gpu=False, log=lambda m: None)
     ok, bad = res["results"]
     assert ok["error"] is None and "no-such-zone" in bad["error"]
+
+
+def test_batch_runs_density_based_jobs(tmp_path):
+    from flowtrace.mesh.fluent_msh import write_fluent_mesh
+
+    path = str(tmp_path / "box.msh")
+    write_fluent_mesh(cartesian_mesh_2d(20, 10, 2.0, 1.0), path)
+    u = 2.0 * np.sqrt(1.4 * 287.0 * 300.0)
+    free = {"kind": "supersonic-inlet", "velocity": [u, 0.0], "p": 1e5, "T": 300.0}
+    case = {"boundaries": {"left": free, "top": free, "right": {"kind": "pressure-outlet", "p": 1e5},
+                           "bottom": {"kind": "slip-wall"}},
+            "init_p": 1e5, "init_T": 300.0, "init_velocity": [0.5 * u, 0.0, 0.0], "tol": 1e-8, "max_iter": 2000}
+    res = run_batch([BatchJob(name="box", mesh=path, case=case, solver="density-based", out_dir=str(tmp_path))],
+                    cpu_workers=1, use_gpu=False)
+    r = res["results"][0] if isinstance(res, dict) else res[0]
+    assert r["error"] is None, r.get("traceback")
+    assert r["converged"]
+    assert abs(r["mass_balance"]["left"] + r["mass_balance"]["right"]) < 1e-6 * abs(r["mass_balance"]["right"])
+    assert os.path.exists(r["ip"])

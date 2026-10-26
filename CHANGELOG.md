@@ -6,6 +6,31 @@ Until 1.0.0, minor versions may still change the Python API; the CLI stays backw
 
 ## [Unreleased]
 
+### Added: density-based compressible solver (`flowtrace.compressible`)
+- Euler / Navier–Stokes / k-ω SST for an ideal gas on 2-D, 3-D polyhedral and axisymmetric
+  meshes: HLLC flux, MUSCL with Venkatakrishnan or Barth limiting, matrix-free implicit steady
+  solver with CFL ramping, SSP-RK3 transient, Fluent-style pressure inlet/outlet, far-field,
+  wall, symmetry/axis boundaries. Theory and verification: `docs/theory/compressible.md`.
+- Compressible k-ω SST (Menter 2003, low-Re wall treatment, hoop strain in axisymmetric cases),
+  loosely coupled with the same local time step; `turb_intensity` / `turb_visc_ratio` per zone.
+- Native HLLC kernels: `ft_hllc_flux` in C++/OpenMP (ABI 2) and CUDA; picked automatically in
+  FP64. 89x faster than the NumPy expression on 1M 3-D faces (4 threads).
+- `flowtrace compressible MESH --case case.json --export DIR` (writes `.ip` and `.npz`), and
+  `BatchJob(solver="density-based")` so `run_batch` places compressible cases on CPU workers and
+  the GPU alongside pressure-based ones.
+- `agglomerate_cells()`: merge cells into polyhedra (used to test polyhedral meshes end to end
+  through the Fluent `.msh` writer and reader).
+- Tests (`tests/test_compressible.py`): Sod tube (order 0.9 in L1), M = 2 / 10° oblique shock
+  (p2/p1 1.7067 vs 1.7066 exact), the same on 24-face polyhedra in 3-D via `.msh`, axisymmetric
+  rest state (laminar and SST), SST flat plate, native vs array kernels; CuPy-path and real-GPU
+  tests.
+- Not yet done: FFF-7 comparison with Fluent and the full rocket-mesh run (the Fluent data and
+  the rocket mesh are not in the repository), and a CUDA run on real hardware.
+
+### Fixed
+- Compressible scaled residuals: momentum components now share one scale, so a component that
+  starts at round-off level (w in a quasi-2-D 3-D case) no longer blocks convergence.
+
 ### Added (merged from the GitHub branch: commits 57b2937, 3d52815)
 - Transient pressure-based solver: implicit Euler / BDF2 with inner iterations per time step
   and Choi's Rhie-Chow correction; transient Taylor-Green on a doubly periodic mesh as a check.

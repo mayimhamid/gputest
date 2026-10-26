@@ -14,7 +14,7 @@
 
 </div>
 
-FlowTrace solves incompressible flow, heat transfer and RANS turbulence. It measures the CPU
+FlowTrace solves incompressible and compressible flow, heat transfer and RANS turbulence. It measures the CPU
 and GPU of the machine it runs on and places each stage of the solve where it is fastest. It
 also reads and writes the files Ansys Fluent uses.
 
@@ -201,6 +201,7 @@ Run `flowtrace gpu-report` on your own machine: these numbers do not transfer to
 |---|---|
 | Structured solver | 2-D incompressible Navier–Stokes + Boussinesq energy on a MAC grid, exact pressure projection (DCT/DST/FFT or GEMM, multigrid with obstacles), QUICK/TVD, AB2 / Crank–Nicolson, FMG |
 | Unstructured solver | Fluent-style pressure-based SIMPLE/SIMPLEC on any cell shape (2-D/3-D), Rhie–Chow, Green–Gauss face-pressure force, AMG-PCG pressure correction; steady or transient (Euler/BDF2, Choi correction); P-1 radiation; passive species transport |
+| Compressible solver | Density-based: HLLC + MUSCL (Venkatakrishnan/Barth), matrix-free implicit steady or SSP-RK3 transient, Euler / Navier–Stokes / k-ω SST, 2-D, 3-D polyhedral and axisymmetric, Fluent-style pressure inlet/outlet and far-field; native C++/CUDA flux kernels ([theory and verification](docs/theory/compressible.md)) |
 | Turbulence | k-ω SST (Menter 2003, y⁺-insensitive wall treatment), realizable and standard k-ε with scalable wall functions |
 | Zones | Conjugate heat transfer (solid zones, volumetric sources), moving reference frames, rotating walls, translational periodicity |
 | Fluent files | `.msh`/`.cas` (ASCII, binary, gzip), CFF `.cas.h5`/`.msh.h5`/`.dat.h5`, `.ip`, `.prof`, journals, PyFluent scripts |
@@ -213,14 +214,14 @@ Run `flowtrace gpu-report` on your own machine: these numbers do not transfer to
 
 * [Installation](docs/install.md) · [Command line](docs/user-guide/cli.md) · [Dashboard](docs/user-guide/dashboard.md) · [Python API](docs/user-guide/python-api.md)
 * [Ansys Fluent workflow](docs/user-guide/fluent.md) · [GPU and the planner](docs/user-guide/gpu.md) · [Native kernels (C++/CUDA)](docs/user-guide/native.md)
-* Theory: [MAC solver](docs/theory/mac.md) · [SIMPLEC](docs/theory/simplec.md) · [turbulence](docs/theory/turbulence.md) · [CHT, MRF, periodic](docs/theory/zones.md) · [verification](docs/theory/verification.md)
-* [Tutorials (Jupyter)](docs/tutorials/) · [Compressible-flow design proposal](docs/design/compressible-flow.md)
+* Theory: [MAC solver](docs/theory/mac.md) · [SIMPLEC](docs/theory/simplec.md) · [compressible](docs/theory/compressible.md) · [turbulence](docs/theory/turbulence.md) · [CHT, MRF, periodic](docs/theory/zones.md) · [verification](docs/theory/verification.md)
+* [Tutorials (Jupyter)](docs/tutorials/)
 
 Build the site locally with `pip install -e ".[docs]" && mkdocs serve`.
 
 ## Limitations
 
-* Incompressible (Boussinesq) flow only. Compressible flow is a [design proposal](docs/design/compressible-flow.md).
+* The compressible solver is verified on canonical cases (Sod, oblique shock, flat plate) but **not yet compared with Fluent** (FFF-7) or run on the full rocket mesh; its CUDA kernel has not run on a GPU yet. See [what is not validated](docs/theory/compressible.md#not-yet-validated).
 * Steady RANS. No LES/DES, multiphase, combustion, radiation or moving/deforming meshes.
 * The structured solver is 2-D. The unstructured solver is 3-D capable, but it is written in
   vectorised Python, so very large 3-D cases run slower than in compiled commercial codes.

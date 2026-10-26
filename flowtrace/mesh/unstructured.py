@@ -763,3 +763,37 @@ def sort_faces_by_zone(mesh: UnstructuredMesh) -> UnstructuredMesh:
         face_zone=fz, n_cells=mesh.n_cells, cell_zone=mesh.cell_zone, zones=zones, name=mesh.name,
         periodic=periodic,
     )
+
+
+def agglomerate_cells(mesh: UnstructuredMesh, group: np.ndarray) -> UnstructuredMesh:
+    """Merge cells with equal ``group`` labels into polygonal / polyhedral cells.
+
+    Faces between two cells of a group disappear; all other faces are kept as they are,
+    so a merged hex block becomes a polyhedron with several coplanar faces per side
+    (what Fluent's polyhedral conversion and many poly meshers produce). Each group must
+    be face-connected and lie in a single cell zone.
+    """
+    group = np.asarray(group)
+    if group.shape != (mesh.n_cells,):
+        raise ValueError("need one group label per cell")
+    if mesh.periodic:
+        raise NotImplementedError("agglomerating a mesh with periodic zones is not supported")
+    _, new = np.unique(group, return_inverse=True)
+    nc = int(new.max()) + 1
+    zone_of = np.full(nc, -1, dtype=np.int64)
+    zone_of[new] = mesh.cell_zone
+    if np.any(zone_of[new] != mesh.cell_zone):
+        raise ValueError("a group spans several cell zones")
+    own = new[mesh.owner]
+    nei = np.where(mesh.neighbour >= 0, new[np.maximum(mesh.neighbour, 0)], -1)
+    keep = own != nei
+    counts = np.diff(mesh.face_ptr)[keep]
+    starts = mesh.face_ptr[:-1][keep]
+    idx = np.repeat(starts - np.concatenate([[0], np.cumsum(counts)[:-1]]), counts) + np.arange(counts.sum())
+    out = UnstructuredMesh(dim=mesh.dim, nodes=mesh.nodes, face_ptr=np.concatenate([[0], np.cumsum(counts)]),
+                           face_nodes=mesh.face_nodes[idx], owner=own[keep], neighbour=nei[keep],
+                           face_zone=mesh.face_zone[keep], n_cells=nc, cell_zone=zone_of,
+                           zones={k: Zone(z.id, z.name, z.type, z.kind) for k, z in mesh.zones.items()},
+                           name=mesh.name + "-poly")
+    out = _renumber_cells(out, zone_of, out.zones)
+    return sort_faces_by_zone(out)

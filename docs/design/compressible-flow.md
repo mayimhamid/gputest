@@ -1,6 +1,8 @@
 # Design: compressible flow in FlowTrace
 
-Status: **proposal** (not implemented). Written before any code, as the roadmap asks.
+Status: **superseded.** A density-based solver was implemented instead; see
+[the density-based compressible solver](../theory/compressible.md). This note is kept as the
+original proposal.
 
 ## Goal
 

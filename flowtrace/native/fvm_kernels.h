@@ -65,6 +65,12 @@ FT_API int ft_bicgstab_jacobi(int64_t n, const int32_t* indptr, const int32_t* i
                               const double* b, const double* inv_diag, double* x, double tol, int64_t maxiter,
                               int relative_to_initial, double* work, int64_t* iters, double* res);
 
+/* HLLC flux of the compressible Euler equations (Toro, Einfeldt/Roe wave speeds) on nf faces.
+ * WL, WR: primitive states (rho, u[dim], p), rows of dim+2; n: unit normals (nf, dim);
+ * A: face areas (may be radius-weighted). out[f, :] = F_hllc(WL, WR, n) * A[f]. */
+FT_API void ft_hllc_flux(int64_t nf, int64_t dim, double gamma, const double* WL, const double* WR,
+                         const double* n, const double* A, double* out);
+
 #ifdef __cplusplus
 }
 #endif
