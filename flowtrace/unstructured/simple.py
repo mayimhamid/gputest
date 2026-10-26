@@ -18,6 +18,7 @@ CuPy; sparse assembly writes directly into a fixed CSR pattern.
 
 from __future__ import annotations
 
+import math
 import time
 from collections import defaultdict
 from typing import Dict
@@ -46,6 +47,20 @@ def rotation_velocity(x: np.ndarray, rot: dict, dim: int) -> np.ndarray:
     r = np.zeros((x.shape[0], 3))
     r[:, :dim] = x - origin[:dim]
     return (w * np.cross(ax[None, :], r))[:, :dim]
+def auto_relax_p(non_orthogonality_deg: float) -> float:
+    """Initial SIMPLEC pressure under-relaxation (the stability guard lowers it if needed).
+
+    SIMPLEC needs none on orthogonal meshes. On non-orthogonal ones the skewed part of the
+    p' Laplacian is neglected and accumulates without it (measured: warped 96^2/128^2 meshes
+    diverged at 1.0 and converge at 0.8, which costs 2-6 % iterations).
+
+    The worst angle alone cannot set a safe value: warped triangles (43 deg) converge at 0.8,
+    uniformly sheared quads (45 deg) diverge at 0.5 and converge at 0.33, because their
+    skew does not alternate in sign from face to face.
+    """
+    return 1.0 if non_orthogonality_deg <= 5.0 else 0.8
+
+
 _KIND_CODE = {"wall": WALL, "inlet": INLET, "outlet": OUTLET, "pressure": PRESSURE, "symmetry": SYMMETRY}
 T_ADIABATIC, T_FIXED, T_FLUX = range(3)
 
@@ -75,13 +90,7 @@ class SimpleSolver:
         self.last_linear = {}
         self._gp = self._gU = self._gT = None  # lagged gradients for boundary reconstruction
         self.external_energy = False  # True when a conjugate (fluid+solid) solver owns the energy equation
-        # SIMPLEC needs no pressure under-relaxation on orthogonal meshes; on non-orthogonal ones
-        # the neglected skewed part of the p' Laplacian accumulates without it (measured: warped
-        # 96^2/128^2 meshes diverged at 1.0 and converge at 0.8, which costs 2-6 % iterations)
-        if case.relax_p is not None:
-            self.relax_p = float(case.relax_p)
-        else:
-            self.relax_p = 1.0 if fv.non_orthogonality_deg <= 5.0 else 0.8
+        self.relax_p = float(case.relax_p) if case.relax_p is not None else auto_relax_p(fv.non_orthogonality_deg)
         self._build_boundaries()
         U0 = np.zeros((self.nc, dim))
         iv = list(case.init_velocity) + [0.0] * 3
@@ -97,6 +106,8 @@ class SimpleSolver:
         from .turbulence import make_turbulence
 
         self.turb = make_turbulence(self)
+        self.guard_enabled = case.relax_p is None  # a user-set relaxation is left alone
+        self._reset_guard()
 
     def initialize(self, fields: dict) -> None:
         """Initialise from cell values with Fluent field names (e.g. an interpolated
@@ -119,6 +130,7 @@ class SimpleSolver:
         self.F = self.case.density * xp.sum(self.fv.face_interp_vec(self.U) * self.fv.S, axis=1)
         self.Fb = self._boundary_flux_fixed(ub)
         self._gp = self._gU = self._gT = None
+        self._reset_guard()
 
     def set_sources(self, momentum=None, energy=None) -> None:
         """Volumetric sources: momentum (nc, dim) [force/volume], energy (nc,) [heat/volume].
@@ -483,6 +495,7 @@ class SimpleSolver:
         self.step_count = self.iteration
         self.last_linear = {"momentum_iters": its, "pressure_iters": pinfo.iterations,
                             "pressure_residual": pinfo.residual}
+        prev = getattr(self, "_last_res", {}), getattr(self, "_last_raw", {})
         self._last_raw = dict(res)  # continuity: un-normalised sum |mass imbalance|
         if self.iteration <= 5:
             self._res_max5["continuity"] = max(self._res_max5.get("continuity", 0.0), res["continuity"], 1e-300)
@@ -493,9 +506,58 @@ class SimpleSolver:
         flux_scale = float(xp.sum(xp.abs(self.F))) + float(xp.sum(xp.abs(self.Fb)))
         res["continuity"] /= max(self._res_max5["continuity"], 1e-3 * flux_scale)
         self._last_res = res
+        if self._stability_guard(self._last_raw["continuity"], flux_scale):
+            self._last_res, self._last_raw = prev  # report the restored state, not the diverged one
+            return 1.0
         if self.iteration > 5 and max(res.values()) < c.tol:
             self.converged = True
         return 1.0
+
+    # divergence guard: roll back and lower the pressure under-relaxation
+    GUARD_GROWTH = 20.0  # continuity above GUARD_GROWTH x its running minimum = diverging
+    GUARD_ROUNDOFF = 1e-6  # ... where that minimum is floored at this fraction of the total face mass flux
+    GUARD_EVERY = 20  # snapshot interval (iterations), taken only while the residual is healthy
+    GUARD_FACTOR = 0.6
+    GUARD_MIN_RELAX = 0.1
+
+    def _reset_guard(self):
+        self.guard_events = []
+        self._guard_min = float("inf")
+        self._guard_snap = (self.state_dict(), float("inf")) if self.guard_enabled else None
+
+    def _stability_guard(self, raw_continuity: float, flux_scale: float) -> bool:
+        """Detect a diverging pressure-velocity coupling and recover from it.
+
+        When the raw continuity residual becomes non-finite or grows ``GUARD_GROWTH``
+        times above its minimum so far (floored at ``GUARD_ROUNDOFF`` x the face mass
+        flux, so that round-off noise in periodic or converged flows is not mistaken
+        for growth), restore the fields of the last healthy snapshot and multiply the
+        pressure under-relaxation by ``GUARD_FACTOR``. The iteration counter is not
+        rewound: discarded iterations count as work, and ``max_iter`` bounds the total.
+        Returns True on a rollback. Only active when ``case.relax_p`` is None.
+        """
+        if not self.guard_enabled or self.external_energy:
+            # a conjugate solver owns the solid temperatures, which a rollback here would not restore
+            return False
+        r = raw_continuity
+        ref = max(self._guard_min, self.GUARD_ROUNDOFF * flux_scale)
+        bad = not math.isfinite(r) or (self.iteration > 10 and r > self.GUARD_GROWTH * ref)
+        if bad and self._guard_snap is not None and self.relax_p * self.GUARD_FACTOR >= self.GUARD_MIN_RELAX:
+            snap, snap_r = self._guard_snap
+            at = self.iteration
+            self.load_state(snap)
+            self.iteration = self.step_count = at
+            self.relax_p *= self.GUARD_FACTOR
+            self._amg_age = 10 ** 9
+            self._guard_min = snap_r
+            self.guard_events.append({"detected_at": at, "restored_to": int(snap["iteration"]),
+                                      "relax_p": round(self.relax_p, 4), "continuity": r})
+            return True
+        if math.isfinite(r) and self.iteration > 5:  # past the start-up transient
+            self._guard_min = min(self._guard_min, r)
+            if self.iteration % self.GUARD_EVERY == 0 and r <= 2.0 * self._guard_min:
+                self._guard_snap = (self.state_dict(), r)
+        return False
 
     def _energy(self) -> float:
         c, fv, xp = self.case, self.fv, self.xp
@@ -548,6 +610,7 @@ class SimpleSolver:
             "cells": self.nc, "faces": self.mesh.n_faces, "dim": self.dim,
             "convection": self.case.scheme,
             "relax_p": self.relax_p,
+            "stability_rollbacks": list(self.guard_events),
             "pressure_solver": "AMG-PCG (" + ("pyamg" if amg is not None and not hasattr(amg, "levels")
                                                else "FlowTrace SA-AMG") + ")",
             "max_non_orthogonality_deg": round(self.fv.non_orthogonality_deg, 2),

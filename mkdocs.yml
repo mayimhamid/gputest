@@ -73,6 +73,7 @@ nav:
       - Validation report: validation/index.md
       - Fluent warm-start study: validation/warmstart.md
       - GPU log: validation/gpu.md
+      - Backend planner study: validation/planner.md
   - Tutorials:
       - Cavity, MMS and grid convergence: tutorials/01_cavity_and_verification.ipynb
       - Turbulent channel (SST vs DNS): tutorials/02_turbulent_channel.ipynb

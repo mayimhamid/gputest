@@ -82,7 +82,8 @@ def run_channel(model: str = "k-omega-sst", backend: str = "numpy", max_iter: in
     U = np.interp(DNS_YPLUS / RE_TAU, y, u)  # u_tau = 1 -> U+ = U
     err = 100.0 * (U - DNS_UPLUS) / DNS_UPLUS
     sel = DNS_YPLUS >= (1.0 if model == "k-omega-sst" else 30.0)
-    return {"model": model, "iterations": s.iteration, "converged": s.converged, "seconds": secs,
+    return {"model": model, "iterations": s.iteration, "converged": s.converged,
+            "stability_rollbacks": len(s.guard_events), "seconds": secs,
             "cells": m.n_cells, "tau_w": float(tau.mean()), "y_plus_first": float(s.turb.yplus[s.turb.wall_b].max()),
             "yplus": DNS_YPLUS.tolist(), "U_dns": DNS_UPLUS.tolist(), "U": U.tolist(), "err_pct": err.tolist(),
             "max_abs_err_pct": float(np.abs(err[sel]).max()), "centre_err_pct": float(err[-1]),
@@ -134,7 +135,8 @@ def run_flat_plate(model: str = "k-omega-sst", backend: str = "numpy", max_iter:
     ref = white_cf(rex)
     sel = (rex >= 1e6) & (rex <= 1e7)
     dev = 100.0 * (cf[sel] - ref[sel]) / ref[sel]
-    return {"model": model, "iterations": s.iteration, "converged": s.converged, "seconds": secs, "cells": m.n_cells,
+    return {"model": model, "iterations": s.iteration, "converged": s.converged,
+            "stability_rollbacks": len(s.guard_events), "seconds": secs, "cells": m.n_cells,
             "x": x.tolist(), "cf": cf.tolist(), "cf_white": ref.tolist(), "re_x": rex.tolist(),
             "mean_dev_pct": float(dev.mean()), "max_abs_dev_pct": float(np.abs(dev).max()),
             "cf_at_x097": float(np.interp(0.97, x, cf)), "white_at_x097": float(white_cf(re * 0.97)),
@@ -195,5 +197,6 @@ def run_bfs(model: str = "k-omega-sst", backend: str = "numpy", max_iter: int = 
     if idx.size:
         i = idx[-1]
         xr = float(x[i] - U[i] * (x[i + 1] - x[i]) / (U[i + 1] - U[i]))
-    return {"model": model, "iterations": s.iteration, "converged": s.converged, "seconds": secs, "cells": m.n_cells,
+    return {"model": model, "iterations": s.iteration, "converged": s.converged,
+            "stability_rollbacks": len(s.guard_events), "seconds": secs, "cells": m.n_cells,
             "x_r": xr, "x": x.tolist(), "cf": (2.0 * tau).tolist()}

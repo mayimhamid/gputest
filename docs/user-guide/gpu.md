@@ -8,10 +8,13 @@
 | `numba` | CPU, all cores | fused JIT stencil kernels (MAC solver), JIT AMG aggregation |
 | `cupy` | NVIDIA GPU | every field resident in VRAM, cuFFT/cuBLAS/cuSPARSE, fused CUDA C++ stencils |
 
-`backend="auto"` picks the GPU, then Numba, then NumPy. For structured cases the **planner
-measures** instead: it builds the real solver on each backend that fits in memory, times real
-steps after a warm-up, and keeps the fastest. Every decision and its measured reason appear in
-the dashboard and in `flowtrace run` output.
+With `backend="auto"` the **planner measures** instead of assuming the GPU is faster. It
+builds the real solver on each backend that fits in memory, times real steps after a warm-up,
+and keeps the fastest. This covers both the structured MAC solver and the unstructured
+SIMPLE/SIMPLEC solver (dashboard, `flowtrace solve`, `flowtrace fluent-warmstart`). Every
+decision and its measured reason appear in the dashboard log and the run report. (The bare
+`get_backend("auto")` used by library code without a case still picks GPU, then Numba, then
+NumPy.)
 
 ## Precision
 
@@ -35,6 +38,26 @@ SIMPLEC runs unchanged on CuPy. The AMG hierarchy is built on the CPU and applie
 For the unstructured solver the profile is dominated by the AMG pressure solve. Its default
 inner tolerance of 0.1, the same as Fluent's AMG default, was chosen from measurements: outer
 iterations stayed the same and wall time dropped 15–50 %.
+
+A SIMPLEC iteration on the GPU launches thousands of small kernels and synchronises with the
+host for every Krylov dot product. Its cost therefore has a **floor that does not shrink with
+the mesh**. Measured on an RTX 4060 Laptop GPU in FP64, cavity, ms per iteration:
+
+| cells | 1 024 | 4 096 | 16 384 | 65 536 | 262 144 |
+|---|---:|---:|---:|---:|---:|
+| CPU (NumPy) | 4.0 | 11.4 | 39.7 | 235 | 861 |
+| GPU (CuPy) | 52.4 | 60.6 | 52.8 | 55.2 | 61.1 |
+
+So the planner for unstructured cases:
+
+1. times the real case on the CPU for one AMG rebuild period (10 iterations, at most ~5 s);
+2. skips the GPU if the CPU is already below 0.7 × the GPU floor. The floor is one iteration on
+   a 16 × 16 mesh, measured once per machine and cached in `~/.flowtrace/planner.json`;
+3. otherwise times the GPU as well and keeps the faster solver.
+
+The iterations used for timing are real iterations, and the kept solver continues from them.
+The [planner study](../validation/planner.md) compares this against fixed CPU, fixed GPU and
+the measured oracle.
 
 ## Measure your own machine
 

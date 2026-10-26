@@ -341,9 +341,9 @@ class Job:
 
     # ---------------- unstructured (Fluent mesh) ----------------
     def _run_unstructured(self, mesh=None, ucase=None):
-        from ..hardware.memory import estimate_unstructured, fmt_bytes
+        from ..hardware.memory import fmt_bytes
+        from ..hardware.planner import plan_unstructured
         from ..unstructured.case import UnstructuredCase, default_boundaries
-        from ..unstructured.conjugate import make_solver
 
         if mesh is None:
             mesh = self.meshes.get(self.spec.get("mesh_id"))
@@ -358,29 +358,26 @@ class Job:
             ucase = UnstructuredCase(boundaries=bnd, **cd)
         self.case = ucase
         self.set_status("planning", name=ucase.name)
-        be = get_backend(ucase.backend)
-        free, _ = be.mem_info()
-        est = estimate_unstructured(mesh.n_cells, mesh.n_faces, mesh.dim, 8, ucase.energy, be.device, free)
         self.log(f"Mesh {mesh.name}: {mesh.n_cells:,} cells, {mesh.n_faces:,} faces, {mesh.dim}D")
-        self.log(f"Memory budget: ~{fmt_bytes(est.required)} of {fmt_bytes(est.available)} free on {be.device}")
-        if not est.fits:
-            if be.is_gpu:
-                self.log("Does not fit on the GPU: falling back to the CPU backend", "warn")
-                be = get_backend("numba" if "numba" in _avail() else "numpy")
-            else:
-                raise MemoryError(" ".join(est.advice))
-        solver = make_solver(mesh, ucase, backend=be)
+        uplan, solver = plan_unstructured(mesh, ucase, log=self.log)
+        be = get_backend(uplan.backend)
+        est = uplan.memory.get(uplan.backend)
+        if est:
+            self.log(f"Memory budget: ~{fmt_bytes(est['required'])} of {fmt_bytes(est['available'])} free on {be.device}")
+        for name, why in uplan.skipped.items():
+            self.log(f"Planner: {name} {why}", "warn" if "fit" in why else "info")
+        self.log(f"Planner: {be.name} ({be.device}), {uplan.reason}")
         self.solver = solver
         desc = solver.describe()
         plan = {
             "backend": be.name, "device": be.device, "precision": desc["precision"],
             "pressure": desc["pressure_solver"], "diffusion": "implicit",
-            "memory": {be.name: est.to_dict()}, "measured_ms_per_step": {}, "fmg": [],
+            "memory": uplan.memory, "measured_ms_per_step": uplan.measured_ms_per_iteration, "fmg": [],
             "placements": [
                 {"stage": "Mesh import & FV geometry", "device": "CPU", "method": "vectorised NumPy (once)",
                  "reason": f"{desc['setup_seconds']} s, max non-orthogonality {desc['max_non_orthogonality_deg']} deg"},
                 {"stage": "Gradients, assembly, momentum", "device": be.device.upper(),
-                 "method": "least-squares gradients, CSR assembly, Jacobi-BiCGSTAB", "reason": "face-parallel, bandwidth bound"},
+                 "method": "least-squares gradients, CSR assembly, Jacobi-BiCGSTAB", "reason": uplan.reason},
                 {"stage": "Pressure correction", "device": be.device.upper(), "method": desc["pressure_solver"],
                  "reason": "AMG makes the elliptic solve mesh-size independent"},
                 {"stage": "AMG hierarchy setup", "device": "CPU", "method": "smoothed aggregation, rebuilt every 10 its",
@@ -394,8 +391,12 @@ class Job:
             self.hub.publish(self.mesh_geometry_event(mesh))
         self._loop(solver, label="SIMPLE")
         res = {"iterations": solver.iteration, "converged": solver.converged, "describe": desc,
-               "timers": dict(solver.timers), "mass_balance": solver.mass_balance()}
+               "timers": dict(solver.timers), "mass_balance": solver.mass_balance(),
+               "stability_rollbacks": list(getattr(solver, "guard_events", []))}
         self.result = res
+        for ev in res["stability_rollbacks"]:
+            self.log(f"Stability guard: diverging at iteration {ev['detected_at']}, continuing from the state of iteration "
+                     f"{ev['restored_to']} with pressure relaxation {ev['relax_p']}", "warn")
         mb = res["mass_balance"]
         net = sum(mb.values())
         self.log(f"Mass balance: net {net:.3e} ({', '.join(f'{k} {v:.4g}' for k, v in mb.items())})")
@@ -468,12 +469,6 @@ class Job:
                 + "\n".join(f"  {k}: {v}" for k, v in bnd.items()) + "\n")
         files["readme"] = readme
         return files
-
-
-def _avail():
-    from ..hardware.backend import available_backends
-
-    return available_backends()
 
 
 def _jsonable(o):

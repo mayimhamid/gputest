@@ -9,12 +9,16 @@ the UI can show the reasoning.
 
 from __future__ import annotations
 
+import json
+import os
+import statistics
+import time
 from dataclasses import asdict, dataclass, field
 from typing import Dict, List, Optional
 
 
 from .backend import BackendUnavailable, available_backends, get_backend
-from .memory import estimate_structured, fmt_bytes
+from .memory import estimate_structured, estimate_unstructured, fmt_bytes
 from .probe import SystemProfile, cached_profile
 
 
@@ -164,3 +168,320 @@ def plan_structured(case, autotune: bool = True, steps: Optional[int] = None,
     if est:
         plan.notes.append(f"Memory: ~{fmt_bytes(est['required'])} of {fmt_bytes(est['available'])} free on {be.device}.")
     return plan, solver
+
+
+# --------------------------------------------------------------------------
+# unstructured (SIMPLE/SIMPLEC) solver
+# --------------------------------------------------------------------------
+#
+# A SIMPLEC iteration on CuPy launches thousands of small kernels and syncs the
+# host for every Krylov dot product, so its cost has a floor that does not
+# shrink with the mesh (measured on an RTX 4060 Laptop GPU, FP64: ~50 ms per
+# iteration from 1k to 262k cells, where the CPU needs 4 ms to 860 ms). The
+# planner therefore
+#
+# 1. times the real solver on the CPU;
+# 2. skips the GPU when the CPU is already faster than the GPU's *floor* (one
+#    iteration on a tiny mesh, measured once per machine and cached): a larger
+#    case cannot make a GPU iteration cheaper than that;
+# 3. otherwise times the real solver on the GPU as well and keeps the faster.
+#
+# Each timed window is one AMG rebuild period, so the host-side hierarchy setup
+# (pyamg on the CPU, FlowTrace SA-AMG for the GPU) is amortised as in the run.
+# The kept solver continues from the iterations spent on timing.
+
+PLANNER_CACHE = os.path.join(os.path.expanduser("~"), ".flowtrace", "planner.json")
+GPU_FLOOR_MARGIN = 0.7  # skip the GPU when t_cpu < margin * floor (the floor is a lower bound)
+
+
+@dataclass
+class UnstructuredPlan:
+    backend: str
+    device: str
+    reason: str
+    measured_ms_per_iteration: Dict[str, float] = field(default_factory=dict)
+    timed_iterations: Dict[str, int] = field(default_factory=dict)
+    skipped: Dict[str, str] = field(default_factory=dict)
+    memory: Dict[str, dict] = field(default_factory=dict)
+    calibration: Optional[dict] = None
+    predicted_ms_per_iteration: Dict[str, float] = field(default_factory=dict)
+    autotune_seconds: float = 0.0
+
+    def to_dict(self) -> dict:
+        return asdict(self)
+
+
+def _machine_key() -> str:
+    """Identity of the CPU and libraries a calibration was measured with. Cheap on
+    purpose (the full hardware probe costs ~1 s, more than planning a small case);
+    the GPU identity is stored inside the entry and checked whenever CUDA is up."""
+    import platform
+    from importlib import metadata
+
+    libs = []
+    for dist in ("numpy", "scipy", "pyamg", "cupy-cuda12x", "cupy-cuda11x", "cupy"):
+        try:
+            libs.append(f"{dist}={metadata.version(dist)}")
+        except metadata.PackageNotFoundError:
+            pass
+    return f"{platform.processor() or platform.machine()}|{os.cpu_count()}|{','.join(libs)}"
+
+
+def _gpu_identity(gpu: str) -> str:
+    be = get_backend(gpu)
+    try:
+        rt = be.xp.cuda.runtime
+        name = rt.getDeviceProperties(be.device_index)["name"]
+        return f"{name.decode() if isinstance(name, bytes) else name}/{rt.driverGetVersion()}"
+    except Exception:
+        return gpu
+
+
+def _cupy_installed() -> bool:
+    """Whether CuPy can be imported, without importing it or creating a CUDA context."""
+    import importlib.util
+    import sys
+
+    if "cupy" in sys.modules:
+        return True
+    try:
+        return importlib.util.find_spec("cupy") is not None
+    except (ImportError, ValueError):
+        return False
+
+
+def _load_cache() -> dict:
+    try:
+        with open(PLANNER_CACHE, encoding="utf-8") as fh:
+            return json.load(fh)
+    except (OSError, ValueError):
+        return {}
+
+
+def cached_calibration(precision: str = "fp64") -> Optional[dict]:
+    """The cached SIMPLEC calibration for this machine, without initialising any device."""
+    return _load_cache().get("unstructured", {}).get(f"{_machine_key()}|{precision}")
+
+
+def _cavity_solver(n: int, backend, precision: str):
+    from ..mesh.unstructured import cartesian_mesh_2d
+    from ..unstructured.case import BoundarySpec, UnstructuredCase
+    from ..unstructured.simple import SimpleSolver
+
+    c = UnstructuredCase(boundaries={"top": BoundarySpec("wall", velocity=[1.0, 0.0])}, max_iter=10 ** 6,
+                         tol=0.0, backend=backend.name, precision=precision)
+    return SimpleSolver(cartesian_mesh_2d(n, n), c, backend=backend)
+
+
+def time_iterations(solver, max_steps: int, warmup: int = 1, budget_s: float = 5.0, min_steps: int = 3) -> List[float]:
+    """Per-iteration wall times (s, device-synchronised) after ``warmup`` iterations.
+
+    Stops after ``max_steps`` timed iterations, when the solver finishes, or once
+    ``budget_s`` is spent (but not before ``min_steps``)."""
+    be = solver.be
+    for _ in range(warmup):
+        if solver.finished:
+            return []
+        solver.step()
+    ts: List[float] = []
+    spent = 0.0
+    while len(ts) < max_steps and not solver.finished:
+        t0 = be.timer()
+        solver.step()
+        ts.append(be.timer() - t0)
+        spent += ts[-1]
+        if spent > budget_s and len(ts) >= min_steps:
+            break
+    return ts
+
+
+def calibrate_unstructured(gpu: Optional[str] = "cupy", cpu: str = "numpy", precision: str = "fp64",
+                           use_cache: bool = True) -> dict:
+    """Machine constants of the SIMPLEC cost model, measured once and cached.
+
+    ``gpu_floor_ms``: median iteration on a 16x16 mesh (launch/sync bound, a
+    lower bound for any mesh); ``cpu_us_per_cell``: mean CPU cost per cell and
+    iteration on 64x64. A cached entry is reused only if it was measured with the
+    same GPU (name and driver) as the one present now.
+    """
+    have_gpu = bool(gpu) and gpu in available_backends()
+    gpu_id = _gpu_identity(gpu) if have_gpu else None
+    key = f"{_machine_key()}|{precision}"
+    cache = _load_cache() if use_cache else {}
+    hit = cache.get("unstructured", {}).get(key)
+    if hit is not None and hit.get("gpu_identity") == gpu_id:
+        return hit
+    out: dict = {"precision": precision, "timestamp": time.time(), "gpu_identity": gpu_id}
+    s = _cavity_solver(64, get_backend(cpu), precision)
+    ts = time_iterations(s, 10, warmup=1)
+    out["cpu_backend"], out["cpu_us_per_cell"] = cpu, 1e6 * statistics.mean(ts) / s.nc
+    if have_gpu and gpu:
+        gbe = get_backend(gpu)
+        try:
+            s = _cavity_solver(16, gbe, precision)
+            ts = time_iterations(s, 10, warmup=3)
+            out["gpu_backend"], out["gpu_floor_ms"] = gpu, 1e3 * statistics.median(ts)
+            del s
+        except Exception as exc:  # recorded, not cached as a valid floor
+            out["gpu_error"] = str(exc)
+            use_cache = False
+        gbe.free_pools()
+    if use_cache:
+        cache.setdefault("unstructured", {})[key] = out
+        try:
+            os.makedirs(os.path.dirname(PLANNER_CACHE), exist_ok=True)
+            with open(PLANNER_CACHE, "w", encoding="utf-8") as fh:
+                json.dump(cache, fh, indent=1)
+        except OSError:
+            pass
+    return out
+
+
+def plan_unstructured(mesh, case, autotune: bool = True, max_steps: Optional[int] = None,
+                      budget_s: float = 5.0, calibration: Optional[dict] = None, log=None):
+    """Choose the backend for an unstructured case; return (UnstructuredPlan, solver).
+
+    A ``case.backend`` other than ``"auto"`` is honoured (with a CPU fallback
+    when the case does not fit in GPU memory). With ``autotune=False`` the
+    decision comes from the calibrated cost model alone, without timing the case.
+    With ``"auto"`` the GPU is initialised only when it could win: if the CPU
+    already beats the cached GPU floor, no CUDA context is created at all.
+    """
+    from ..unstructured.conjugate import make_solver
+
+    log = log or (lambda msg: None)
+    t_start = time.perf_counter()
+    itemsize = 4 if case.precision == "fp32" else 8
+    wanted = case.backend or "auto"
+    plan = UnstructuredPlan(backend="", device="", reason="")
+    memory, skipped = plan.memory, plan.skipped
+
+    def cpu_name() -> str:
+        try:
+            get_backend("numba")
+            return "numba"  # same SIMPLEC code path as NumPy; Numba JITs the fallback AMG
+        except BackendUnavailable:
+            return "numpy"
+
+    def fits(name: str) -> bool:
+        be = get_backend(name)
+        free, _ = be.mem_info()
+        est = estimate_unstructured(mesh.n_cells, mesh.n_faces, mesh.dim, itemsize, case.energy, be.device, free)
+        memory[name] = est.to_dict()
+        if not est.fits:
+            skipped[name] = "does not fit in memory: " + " ".join(est.advice)
+        return est.fits
+
+    def finish(name: str, reason: str, solver=None):
+        be = get_backend(name)
+        plan.backend, plan.device, plan.reason = name, be.device, reason
+        if solver is None:
+            solver = make_solver(mesh, case, backend=be)
+        plan.autotune_seconds = round(time.perf_counter() - t_start, 3)
+        return plan, solver
+
+    def time_on(name: str):
+        """(solver, ms per iteration); (solver, None) if it converged while timed; None if it failed."""
+        be = get_backend(name)
+        try:
+            s = make_solver(mesh, case, backend=be)
+            period = getattr(getattr(s, "flow", s), "amg_rebuild", 10)
+            ts = time_iterations(s, max_steps or period, warmup=2 if be.is_gpu else 1, budget_s=budget_s)
+        except Exception as exc:  # a backend that fails at runtime is simply not chosen
+            skipped[name] = f"failed during autotune ({exc})"
+            return None
+        if not ts or s.finished:
+            return s, None
+        ms = 1e3 * statistics.mean(ts)
+        plan.timed_iterations[name] = len(ts)
+        plan.measured_ms_per_iteration[name] = round(ms, 3)
+        log(f"Planner: {name} {ms:.2f} ms/iteration ({len(ts)} iterations timed)")
+        return s, ms
+
+    if wanted != "auto":  # an explicit choice: initialise only that device (raises BackendUnavailable)
+        be = get_backend(wanted)
+        if fits(wanted):
+            return finish(wanted, "user choice")
+        if not be.is_gpu:
+            raise MemoryError("case does not fit in memory: " + "; ".join(skipped.values()))
+        return finish(cpu_name(), f"{wanted} does not fit in memory: CPU fallback")
+
+    cpu = cpu_name()
+    gpu_installed = _cupy_installed()
+    cpu_fits = fits(cpu)
+    cal = calibration or cached_calibration(case.precision)
+    if calibration is None and cal is not None and cal.get("gpu_identity") is None and gpu_installed:
+        cal = None  # calibrated while no GPU was usable here: measure again once CUDA is up
+
+    def gpu_ready() -> Optional[str]:
+        if not gpu_installed or "cupy" not in available_backends():
+            return None
+        return "cupy" if fits("cupy") else None
+
+    if not autotune:
+        if cal is None:
+            cal = calibrate_unstructured(gpu=gpu_ready(), cpu="numpy", precision=case.precision)
+        plan.calibration = cal
+        floor = cal.get("gpu_floor_ms")
+        pred_cpu = cal["cpu_us_per_cell"] * 1e-3 * mesh.n_cells
+        plan.predicted_ms_per_iteration = {cpu: round(pred_cpu, 3)}
+        if floor is None:
+            return finish(cpu, "no usable GPU")
+        plan.predicted_ms_per_iteration["cupy"] = round(floor, 3)
+        model = (f"cost model: CPU ~{pred_cpu:.1f} ms/it ({cal['cpu_us_per_cell']:.2f} us/cell x "
+                 f"{mesh.n_cells:,} cells) vs GPU floor {floor:.1f} ms/it")
+        if cpu_fits and pred_cpu < floor:
+            return finish(cpu, model)
+        gpu = gpu_ready()
+        return finish(gpu, model) if gpu else finish(cpu, "GPU unavailable or too small")
+
+    solvers: Dict[str, object] = {}
+    timings: Dict[str, float] = {}
+    if cpu_fits:
+        r = time_on(cpu)
+        if r is not None:
+            if r[1] is None:
+                return finish(cpu, "converged while being timed", r[0])
+            solvers[cpu], timings[cpu] = r
+
+    def gpu_hopeless(floor) -> bool:
+        return cpu in timings and floor is not None and timings[cpu] < GPU_FLOOR_MARGIN * floor
+
+    floor = (cal or {}).get("gpu_floor_ms")
+    if gpu_hopeless(floor):  # decided from the cached floor: CUDA is never initialised
+        plan.calibration = cal
+        skipped["cupy"] = (f"not timed: the CPU's {timings[cpu]:.1f} ms/it is below {GPU_FLOOR_MARGIN:g} x the GPU "
+                           f"floor of {floor:.1f} ms/it measured on this machine")
+        return finish(cpu, f"fastest measured: {cpu} {timings[cpu]:.2f} ms/it; GPU {skipped['cupy']}", solvers[cpu])
+    gpu = gpu_ready()
+    if gpu is not None:
+        if calibration is None and (cal is None or cal.get("gpu_identity") != _gpu_identity(gpu)):
+            cal = calibrate_unstructured(gpu=gpu, cpu="numpy", precision=case.precision)
+        plan.calibration = cal
+        floor = cal.get("gpu_floor_ms")
+        if gpu_hopeless(floor):
+            skipped[gpu] = (f"not timed: the CPU's {timings[cpu]:.1f} ms/it is below {GPU_FLOOR_MARGIN:g} x the "
+                            f"GPU floor of {floor:.1f} ms/it measured on this machine")
+        else:
+            r = time_on(gpu)
+            if r is not None:
+                if r[1] is None:
+                    return finish(gpu, "converged while being timed", r[0])
+                solvers[gpu], timings[gpu] = r
+    if not timings:
+        if not cpu_fits and gpu is None:
+            raise MemoryError("case does not fit in memory: " + "; ".join(skipped.values()))
+        raise RuntimeError("no backend could run this case: " + "; ".join(skipped.values()))
+    best = min(timings, key=lambda k: timings[k])
+    for name in list(solvers):
+        if name != best:
+            del solvers[name]
+            get_backend(name).free_pools()
+    if len(timings) == 1 and not skipped:
+        reason = "only available backend"
+    else:
+        others = ", ".join(f"{k} {v:.2f}" for k, v in timings.items() if k != best)
+        reason = f"fastest measured: {best} {timings[best]:.2f} ms/it" + (f" vs {others}" if others else "")
+        if "cupy" in skipped and best != "cupy":
+            reason += f"; GPU {skipped['cupy']}"
+    return finish(best, reason, solvers[best])

@@ -4,6 +4,31 @@ All notable changes to FlowTrace. The project follows [Semantic Versioning](http
 MAJOR for incompatible API/CLI changes, MINOR for new features, PATCH for fixes.
 Until 1.0.0, minor versions may still change the Python API; the CLI stays backward compatible.
 
+## [Unreleased]
+
+### Performance
+- Measured backend planner for the unstructured solver (`plan_unstructured`), used by the
+  dashboard, `flowtrace solve` and `flowtrace fluent-warmstart`. Before, `backend="auto"` always
+  chose the GPU. On an RTX 4060 Laptop GPU in FP64 that was 5–13× slower than the CPU below
+  ~5k cells (both shipped example meshes) and 1.3× slower at 16k cells, because a GPU SIMPLEC
+  iteration has a ~50 ms floor. The planner times the CPU, skips the GPU when the CPU beats
+  the GPU's cached floor, and otherwise times both. See `benchmarks/planner_unstructured.py`
+  and `docs/validation/planner.md`.
+
+### Fixed
+- SIMPLEC diverged on meshes with coherent ~45° skew, such as GAMBIT block meshes around a
+  square cylinder: within 12 iterations at Re = 400, and even at Re = 4. A stability guard now
+  takes snapshots while the continuity residual is healthy. If the residual becomes non-finite
+  or grows 20× above its running minimum, the guard restores the fields and lowers the pressure
+  under-relaxation (×0.6, down to 0.1). The running minimum is floored at 1e-6 of the face mass
+  flux, so round-off noise in periodic flows is not mistaken for growth. The iteration counter
+  is not rewound, so discarded iterations count as work. The guard is only active when
+  `relax_p` is automatic, and every rollback is logged and written to the run report. Warped
+  triangles (43°) are unaffected and keep α_p = 0.8: the worst face angle alone does not
+  predict the instability. The principled fix, non-orthogonal correctors in the p′ equation,
+  is not implemented yet.
+- The warm-start report's `solve_seconds` now includes the planner's timing iterations.
+
 ## [0.2.0] - 2026-10-25
 
 ### Verification and validation

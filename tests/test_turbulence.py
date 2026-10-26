@@ -53,6 +53,8 @@ def test_turbulent_channel_runs_and_reports_fields(model, tmp_path):
 def test_sst_channel_matches_dns():
     r = run_channel("k-omega-sst")
     assert r["converged"] and abs(r["tau_w"] - 1.0) < 0.01
+    # periodic: the continuity residual is round-off noise, which must not trip the stability guard
+    assert r["stability_rollbacks"] == 0
     assert r["max_abs_err_pct"] < 5.0, r["err_pct"]
 
 

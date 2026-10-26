@@ -90,11 +90,10 @@ solver.exit()
 
 def run_warmstart(path: str, case, out_dir: str, iterations_fluent: int = 500, setup_physics: bool = False,
                   allow_bad_mesh: bool = False, log=print) -> dict:
-    from ..hardware.backend import get_backend
+    from ..hardware.planner import plan_unstructured
     from ..mesh.fluent_h5 import is_h5, read_any_mesh, write_data_h5
     from ..mesh.quality import mesh_quality
     from ..unstructured.case import default_boundaries
-    from ..unstructured.conjugate import make_solver
     from .export import write_interpolation_file
 
     t0 = time.perf_counter()
@@ -111,9 +110,10 @@ def run_warmstart(path: str, case, out_dir: str, iterations_fluent: int = 500, s
                              f"({', '.join(sorted(bnd))})")
         bnd[k] = v
     case.boundaries = bnd
-    solver = make_solver(mesh, case, backend=get_backend(case.backend))
+    t1 = time.perf_counter()  # solve time includes the planner's timed iterations
+    plan, solver = plan_unstructured(mesh, case, log=log)
+    log(f"Backend: {plan.backend} ({plan.device}), {plan.reason}")
     hist = []
-    t1 = time.perf_counter()
     last = 0.0
     while not solver.finished:
         solver.step()
@@ -123,6 +123,9 @@ def run_warmstart(path: str, case, out_dir: str, iterations_fluent: int = 500, s
             last = time.perf_counter()
             log(f"  it {solver.iteration:>6}  " + "  ".join(f"{k}={v:.2e}" for k, v in r.items()))
     solve_s = time.perf_counter() - t1
+    for ev in getattr(solver, "guard_events", []):
+        log(f"Stability guard: diverging at iteration {ev['detected_at']}, continuing from the state of iteration "
+            f"{ev['restored_to']} with pressure relaxation {ev['relax_p']}")
     os.makedirs(out_dir, exist_ok=True)
     f = solver.fields()
     keep = ("x-velocity", "y-velocity", "z-velocity", "pressure", "temperature", "turb-kinetic-energy",
@@ -135,7 +138,8 @@ def run_warmstart(path: str, case, out_dir: str, iterations_fluent: int = 500, s
                                          iterations_fluent, setup_physics, mesh.dim))
     report = {"input": os.path.abspath(path), "format": fmt, "cells": mesh.n_cells, "dim": mesh.dim,
               "iterations": solver.iteration, "converged": solver.converged, "solve_seconds": solve_s,
-              "total_seconds": time.perf_counter() - t0, "case": _jsonable(case.to_dict()),
+              "total_seconds": time.perf_counter() - t0, "plan": plan.to_dict(),
+              "stability_rollbacks": list(getattr(solver, "guard_events", [])), "case": _jsonable(case.to_dict()),
               "mass_balance": solver.mass_balance(), "heat_flow": solver.heat_flow() if case.energy else {},
               "quality": qual.to_dict(), "residual_history": hist[-500:], "files": files, "disclaimer": DISCLAIMER}
     p = os.path.join(out_dir, "report.json")
