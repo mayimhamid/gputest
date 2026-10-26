@@ -78,5 +78,6 @@ sum to zero, which is checked by the benchmarks.
 
 Manufactured solution on smoothly warped quads and triangles (`mms_simplec_quads`,
 `mms_simplec_tri`): observed order about 2 for velocity and temperature; pressure 2.0 on quads and
-between first and second order (1.2–1.5) on triangles.
+between first and second order on triangles: 1.2 for the finest grid pair of the full tier,
+1.4 on the coarser grids of the quick tier.
 Global mass and energy balances hold to ~1e-12.

@@ -1,0 +1,42 @@
+{
+ "date": "2026-10-26T06:38:07",
+ "cpu": "AMD Ryzen 9 7940HS w/ Radeon 780M Graphics",
+ "gpu": "NVIDIA GeForce RTX 4060 Laptop GPU",
+ "backends": [
+  "numpy",
+  "cupy"
+ ],
+ "rows": [
+  {
+   "n": 32,
+   "cells": 1024,
+   "numpy": 1.637749999645166,
+   "cupy": 15.166850000241539
+  },
+  {
+   "n": 64,
+   "cells": 4096,
+   "numpy": 4.749699999592849,
+   "cupy": 16.38730000013311
+  },
+  {
+   "n": 128,
+   "cells": 16384,
+   "numpy": 20.42874999824562,
+   "cupy": 18.226599997433368
+  },
+  {
+   "n": 256,
+   "cells": 65536,
+   "numpy": 113.63379999966128,
+   "cupy": 18.55124999929103
+  },
+  {
+   "n": 512,
+   "cells": 262144,
+   "numpy": 485.7618000023649,
+   "cupy": 30.006950000824872
+  }
+ ],
+ "reproduce": "python benchmarks/simplec_iteration_cost.py --sizes 32,64,128,256,512"
+}

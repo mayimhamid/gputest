@@ -55,13 +55,18 @@ FlowTrace addresses this gap in three ways:
    mechanism. Generated journals and PyFluent scripts open the user's *original* case, so the
    physics set up in Fluent is unchanged. A built-in study measures how many iterations the
    field saves. It uses FlowTrace's own pressure-based solver as a measured proxy, and Ansys
-   Fluent when a licence is available.
+   Fluent when a licence is available. In the proxy study, the FlowTrace field reduced the
+   iterations to the converged solution by factors of 1.4 to 2.4 in four of five cases. It
+   increased them in the fifth, a cylinder that the pre-solve and target meshes resolve
+   differently. The Fluent measurement has not been made yet.
 2. **Measured, not assumed, hardware placement.** For a 1024² lid-driven cavity, the MAC
-   solver on a laptop GPU (RTX 4060) was measured 22× faster per time step than the multi-core
-   CPU path. For grids of 128² and smaller the CPU is faster, and the planner chooses
-   accordingly. Fused CUDA kernels, compiled at run time with NVRTC, replace launch-bound
-   vectorised code in the stencils. They were ported only after profiling, and they come with
-   equality tests against the vectorised path.
+   solver on a laptop GPU (RTX 4060, FP32) was measured about 30× faster per time step than
+   the 16-thread CPU path (Numba, FP64). For grids of 128² and smaller the CPU is faster, and
+   the planner chooses accordingly. A SIMPLEC iteration on the same GPU costs at least about
+   15 ms, so the unstructured solver gains from it only above about 16,000 cells. Fused CUDA
+   kernels, compiled at run time with NVRTC, replace launch-bound vectorised code in the
+   stencils. They were ported only after profiling, and they come with equality tests
+   against the vectorised path.
 3. **Evidence.** A single command, `flowtrace benchmark`, regenerates every number the project
    publishes, including those quoted in this paper. It writes a JSON record, an HTML/PDF report
    and a Markdown table.
@@ -72,7 +77,7 @@ Code verification uses the method of manufactured solutions [@roache2002] on sys
 refined, smoothly distorted meshes. The structured solver shows second-order convergence for
 velocity, pressure and temperature. The unstructured solver shows second order for velocity
 and temperature on warped quadrilaterals and triangles. Pressure converges at second order on
-quadrilaterals and at an order between 1.2 and 1.5 on triangles.
+quadrilaterals. On triangles its observed order is 1.2 for the finest grid pair.
 
 The manufactured solutions also exposed a defect that conventional validation had missed. The
 unstructured solver agreed with the lid-driven cavity data of @ghia1982 to within 0.007, yet its
@@ -87,12 +92,16 @@ covers:
 
 * laminar cavity flows [@ghia1982] and natural convection [@devahldavis1983];
 * a turbulent channel at Re_τ = 392 against direct numerical simulation [@moser1999], where SST
-  is within 5 % of the DNS mean velocity at all compared points;
+  is within 4.1 % of the DNS mean velocity at all compared points;
 * the zero-pressure-gradient flat plate against skin-friction correlations [@white1974];
-* the backward-facing step of @driver1985.
+* the backward-facing step of @driver1985, where SST predicts a reattachment length of 6.61
+  step heights against the measured 6.26.
 
 The validation report in the documentation lists every case, its acceptance criterion and the
-measured result, including the known deviations of the k-ε models.
+measured result. In the run committed with this paper, 68 of 70 acceptance checks pass. The two
+failures are reported, and their criteria were not relaxed. With wall functions, the realizable
+k-ε model under-predicts flat-plate skin friction by 7.0 % against the Schultz-Grunow
+correlation (criterion 6 %). The other failure is the cylinder warm start described above.
 
 # Implementation notes
 

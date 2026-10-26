@@ -9,11 +9,13 @@ Until 1.0.0, minor versions may still change the Python API; the CLI stays backw
 ### Performance
 - Measured backend planner for the unstructured solver (`plan_unstructured`), used by the
   dashboard, `flowtrace solve` and `flowtrace fluent-warmstart`. Before, `backend="auto"` always
-  chose the GPU. On an RTX 4060 Laptop GPU in FP64 that was 5–13× slower than the CPU below
-  ~5k cells (both shipped example meshes) and 1.3× slower at 16k cells, because a GPU SIMPLEC
-  iteration has a ~50 ms floor. The planner times the CPU, skips the GPU when the CPU beats
-  the GPU's cached floor, and otherwise times both. See `benchmarks/planner_unstructured.py`
-  and `docs/validation/planner.md`.
+  chose the GPU. A GPU SIMPLEC iteration has a floor of about 15 ms on an RTX 4060 Laptop GPU
+  in FP64. Per iteration, the GPU is therefore 3.5–9.5× slower than the CPU below 5k cells and
+  breaks even near 16k cells (`benchmarks/simplec_iteration_cost.py`). The planner times the
+  CPU, skips the GPU when the CPU beats the GPU's cached floor, and otherwise times both. In
+  the study (`benchmarks/planner_unstructured.py`, `docs/validation/planner.md`) it always ends
+  on the right device. On 100-iteration runs, though, its timing overhead exceeds the study's
+  15 % budget at 2 of 6 mesh sizes (×1.48 and ×1.43 the faster fixed choice).
 
 ### Fixed
 - SIMPLEC diverged on meshes with coherent ~45° skew, such as GAMBIT block meshes around a
@@ -48,7 +50,14 @@ Until 1.0.0, minor versions may still change the Python API; the CLI stays backw
 
 ### Documentation
 - README (English and Persian) and the JOSS paper draft now quote the numbers of the full
-  benchmark run committed in `benchmarks/results/`.
+  benchmark run committed in `benchmarks/results/`: 24 of 26 benchmarks and 68 of 70
+  acceptance checks pass. The two failures, realizable k-ε flat-plate skin friction and the
+  cylinder warm start, are analysed in the validation report.
+- `benchmarks/warmstart_cylinder_wake.py` shows why the cylinder warm start is slower: the
+  pre-solve and target meshes resolve the cylinder differently (12 vs 9 cells per diameter),
+  and their converged recirculation lengths differ (1.87 D vs 2.33 D).
+- The planner study has been run at the committed code. A1 and A3 pass at all sizes; A2
+  fails at 9,216 and 65,536 cells, and the overhead is explained in the study page.
 
 ## [0.2.0] - 2026-10-25
 

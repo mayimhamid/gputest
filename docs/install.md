@@ -43,5 +43,5 @@ Later starts only reinstall when the FlowTrace version or the GPU situation chan
 flowtrace --version
 flowtrace probe
 pytest -q                          # from a source checkout: ~140 tests
-flowtrace benchmark --tier quick   # the verification suite (~3 minutes)
+flowtrace benchmark --tier quick   # the verification suite (~2 minutes)
 ```

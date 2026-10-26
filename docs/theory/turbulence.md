@@ -81,8 +81,9 @@ planes are zero-gradient.
 | Channel Re_τ = 392 | SST, y⁺ ≈ 0.25 | U⁺ within 4.1 % at all 16 DNS points | MKM 1999 DNS |
 | Channel Re_τ = 392 | standard k-ε, WF | within 3.5 % for y⁺ ≥ 30 | MKM 1999 DNS |
 | Channel Re_τ = 392 | realizable k-ε, WF | within 7.6 % for y⁺ ≥ 30 (core over-predicted) | MKM 1999 DNS |
-| Flat plate Re_L = 5×10⁶ | SST | Cf 3–4 % below Schultz-Grunow, ~10 % below White | correlations |
-| Backward-facing step | SST | x_r/H = 6.61 | 6.26 ± 0.10 (Driver & Seegmiller) |
+| Flat plate Re_L = 5×10⁶ | SST, y⁺ < 1 | Cf 5.3 % below Schultz-Grunow, 9.8 % below White | correlations |
+| Flat plate Re_L = 5×10⁶ | realizable k-ε, WF | Cf 7.0 % below Schultz-Grunow (**fails** the 6 % criterion), 11.4 % below White | correlations |
+| Backward-facing step | SST | x_r/H = 6.61 (+5.6 %) | 6.26 ± 0.10 (Driver & Seegmiller) |
 
 The numbers above were measured with `flowtrace benchmark --tier full`. The authoritative,
 regenerated values are in the [validation report](../validation/index.md).

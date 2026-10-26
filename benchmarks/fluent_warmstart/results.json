@@ -1,0 +1,202 @@
+{
+ "proxy": [
+  {
+   "case": "cavity",
+   "title": "Lid-driven cavity, Re = 400",
+   "cells_source": 4096,
+   "cells_target": 3200,
+   "flowtrace_seconds": 8.156361900000775,
+   "cold_iterations": 1162,
+   "warm_iterations": 488,
+   "cold_iterations_tol": 960,
+   "warm_iterations_normalised": 417,
+   "cold_seconds": 6.918498900002305,
+   "warm_seconds": 2.049753100000089,
+   "cold_converged": true,
+   "warm_converged": true,
+   "max_velocity_difference": 9.942905307980254e-05,
+   "stride": 1,
+   "package": {
+    "msh": "flowtrace.msh",
+    "ip": "flowtrace.ip",
+    "jou": "run_fluent.jou",
+    "py": "run_pyfluent.py",
+    "csv": "flowtrace_cells.csv",
+    "readme": "README_FLUENT.txt"
+   },
+   "speedup": 2.3811475409836067
+  },
+  {
+   "case": "channel",
+   "title": "Developing channel flow, Re = 100",
+   "cells_source": 2048,
+   "cells_target": 1152,
+   "flowtrace_seconds": 0.3790064999993774,
+   "cold_iterations": 68,
+   "warm_iterations": 47,
+   "cold_iterations_tol": 77,
+   "warm_iterations_normalised": null,
+   "cold_seconds": 0.31979320000027656,
+   "warm_seconds": 0.14560509999864735,
+   "cold_converged": true,
+   "warm_converged": true,
+   "max_velocity_difference": 9.47683583945036e-05,
+   "stride": 1,
+   "package": {
+    "msh": "flowtrace.msh",
+    "ip": "flowtrace.ip",
+    "jou": "run_fluent.jou",
+    "py": "run_pyfluent.py",
+    "csv": "flowtrace_cells.csv",
+    "readme": "README_FLUENT.txt"
+   },
+   "speedup": 1.446808510638298
+  },
+  {
+   "case": "step",
+   "title": "Backward-facing step, Re = 200 (laminar)",
+   "cells_source": 10240,
+   "cells_target": 5616,
+   "flowtrace_seconds": 224.23682109999936,
+   "cold_iterations": 772,
+   "warm_iterations": 418,
+   "cold_iterations_tol": 617,
+   "warm_iterations_normalised": 366,
+   "cold_seconds": 8.066698000002361,
+   "warm_seconds": 3.2295971999992616,
+   "cold_converged": true,
+   "warm_converged": true,
+   "max_velocity_difference": 9.984512871596962e-05,
+   "stride": 2,
+   "package": {
+    "msh": "flowtrace.msh",
+    "ip": "flowtrace.ip",
+    "jou": "run_fluent.jou",
+    "py": "run_pyfluent.py",
+    "csv": "flowtrace_cells.csv",
+    "readme": "README_FLUENT.txt"
+   },
+   "speedup": 1.8468899521531101
+  },
+  {
+   "case": "cylinder",
+   "title": "Cylinder in a channel, Re = 40 (steady)",
+   "cells_source": 18432,
+   "cells_target": 10308,
+   "flowtrace_seconds": 331.8898558999972,
+   "cold_iterations": 700,
+   "warm_iterations": 1085,
+   "cold_iterations_tol": 886,
+   "warm_iterations_normalised": null,
+   "cold_seconds": 36.031466100001126,
+   "warm_seconds": 21.31880699999965,
+   "cold_converged": true,
+   "warm_converged": true,
+   "max_velocity_difference": 9.801668784348294e-05,
+   "stride": 5,
+   "package": {
+    "msh": "flowtrace.msh",
+    "ip": "flowtrace.ip",
+    "jou": "run_fluent.jou",
+    "py": "run_pyfluent.py",
+    "csv": "flowtrace_cells.csv",
+    "readme": "README_FLUENT.txt"
+   },
+   "speedup": 0.6451612903225806
+  },
+  {
+   "case": "heated",
+   "title": "Natural convection, Ra = 1e5 (heated cavity)",
+   "cells_source": 4096,
+   "cells_target": 3200,
+   "flowtrace_seconds": 4.034803799997462,
+   "cold_iterations": 316,
+   "warm_iterations": 158,
+   "cold_iterations_tol": 276,
+   "warm_iterations_normalised": null,
+   "cold_seconds": 3.324791200000618,
+   "warm_seconds": 1.192051400001219,
+   "cold_converged": true,
+   "warm_converged": true,
+   "max_velocity_difference": 9.946875798050314e-05,
+   "stride": 1,
+   "package": {
+    "msh": "flowtrace.msh",
+    "ip": "flowtrace.ip",
+    "jou": "run_fluent.jou",
+    "py": "run_pyfluent.py",
+    "csv": "flowtrace_cells.csv",
+    "readme": "README_FLUENT.txt"
+   },
+   "speedup": 2.0
+  }
+ ],
+ "fluent": [
+  {
+   "case": "cavity",
+   "status": "not-run",
+   "cold_iterations": null,
+   "warm_iterations": null,
+   "message": "ansys-fluent-core is not installed (pip install ansys-fluent-core)",
+   "speedup": null
+  },
+  {
+   "case": "channel",
+   "status": "not-run",
+   "cold_iterations": null,
+   "warm_iterations": null,
+   "message": "ansys-fluent-core is not installed (pip install ansys-fluent-core)",
+   "speedup": null
+  },
+  {
+   "case": "step",
+   "status": "not-run",
+   "cold_iterations": null,
+   "warm_iterations": null,
+   "message": "ansys-fluent-core is not installed (pip install ansys-fluent-core)",
+   "speedup": null
+  },
+  {
+   "case": "cylinder",
+   "status": "not-run",
+   "cold_iterations": null,
+   "warm_iterations": null,
+   "message": "ansys-fluent-core is not installed (pip install ansys-fluent-core)",
+   "speedup": null
+  },
+  {
+   "case": "heated",
+   "status": "not-run",
+   "cold_iterations": null,
+   "warm_iterations": null,
+   "message": "ansys-fluent-core is not installed (pip install ansys-fluent-core)",
+   "speedup": null
+  }
+ ],
+ "tolerance": 1e-05,
+ "machine": {
+  "date": "2026-10-26T06:23:39",
+  "os": "Windows 11",
+  "python": "3.13.17",
+  "cpu": "AMD Ryzen 9 7940HS w/ Radeon 780M Graphics",
+  "cores": "8C/16T",
+  "ram_gb": 15.2,
+  "gpu": "NVIDIA GeForce RTX 4060 Laptop GPU",
+  "backends": [
+   "numpy",
+   "numba",
+   "cupy"
+  ],
+  "libraries": {
+   "numpy": "2.5.4",
+   "scipy": "1.18.1",
+   "numba": "0.68.0",
+   "cupy": "14.2.0",
+   "pyamg": "5.3.0",
+   "psutil": "7.2.2",
+   "pyfluent": null
+  },
+  "flowtrace": "0.2.0",
+  "platform": "Windows-11-10.0.26300-SP0"
+ }
+}

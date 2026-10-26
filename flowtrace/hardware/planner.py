@@ -176,9 +176,9 @@ def plan_structured(case, autotune: bool = True, steps: Optional[int] = None,
 #
 # A SIMPLEC iteration on CuPy launches thousands of small kernels and syncs the
 # host for every Krylov dot product, so its cost has a floor that does not
-# shrink with the mesh (measured on an RTX 4060 Laptop GPU, FP64: ~50 ms per
-# iteration from 1k to 262k cells, where the CPU needs 4 ms to 860 ms). The
-# planner therefore
+# shrink with the mesh (measured on an RTX 4060 Laptop GPU, FP64: 15-30 ms per
+# iteration from 1k to 262k cells, where the CPU needs 1.6 ms to 490 ms;
+# benchmarks/simplec_iteration_cost.py). The planner therefore
 #
 # 1. times the real solver on the CPU;
 # 2. skips the GPU when the CPU is already faster than the GPU's *floor* (one

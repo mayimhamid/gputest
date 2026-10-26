@@ -58,8 +58,8 @@ This writes `flowtrace.ip`, `flowtrace.dat.h5` (for HDF5 input), `warmstart.jou`
 
 ```bash
 flowtrace benchmark --list
-flowtrace benchmark --tier quick --out benchmarks/results       # ~3 min
-flowtrace benchmark --tier full --out benchmarks/results        # turbulence + warm start, ~1 h
+flowtrace benchmark --tier quick --out benchmarks/results       # ~2 min
+flowtrace benchmark --tier full --out benchmarks/results        # turbulence + warm start, ~40 min
 flowtrace benchmark --only mms_simplec_tri,channel_retau395_sst
 flowtrace warmstart-study --cases cavity,step --out ws_study/   # FlowTrace proxy (+ Fluent if licensed)
 flowtrace parse-transcript cold.trn warm.trn                    # iterations from Fluent transcripts

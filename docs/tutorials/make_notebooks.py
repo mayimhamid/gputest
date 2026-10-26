@@ -142,8 +142,8 @@ within 10⁻⁴ (relative, max norm) of that answer.""",
 W.CASES["tutorial"] = {"title": "cavity Re=100", "preset": "cavity", "params": {"re": 100, "n": 48},
                        "target": {"kind": "tri", "n": 32}}
 r = W.run_proxy_case("tutorial", os.path.join(work, "study"), backend="numpy")
-print(f"cold start {r.cold_iterations} iterations, warm start {r.warm_iterations} iterations "
-      f"(x{r.speedup:.1f}); converged solutions differ by {r.max_velocity_difference:.1e} (relative)")""",
+print(f"to the converged field: cold start {r.cold_iterations} iterations, warm start {r.warm_iterations} "
+      f"iterations (x{r.speedup:.1f}); warm field within {r.max_velocity_difference:.1e} of the cold solution")""",
 ]
 
 

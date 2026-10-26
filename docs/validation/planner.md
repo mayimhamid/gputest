@@ -36,6 +36,27 @@ it was replaced before the study was run.
 
 --8<-- "benchmarks/results/planner_unstructured.md"
 
+**Reading the result.** The study rejects the planner as specified: A2 fails at two of six
+sizes. A1 and A3 hold everywhere. The planner always ends on the right device, and its timing
+iterations do not change the solution beyond run-to-run noise. What fails is the cost of
+deciding. In `planner_unstructured.json` (`plan_seconds` of the planner runs):
+
+* **9,216 cells:** the CPU is not fast enough to rule out the GPU from the cached floor, so the
+  planner builds and times a solver on both devices. That phase took 2.2–2.4 s, as long as the
+  whole 100-iteration CPU run (2.3 s). It then correctly kept the CPU (Numba, 13–16 ms per
+  iteration against 21–25 ms on the GPU).
+* **65,536 cells:** the planner spends ten CPU timing iterations (about 0.13 s each, 1.3 s in
+  total) before it moves to the GPU. Planning took 3.7 s in all. A fixed GPU run of the same 100
+  iterations takes 4.0 s, the planner 5.8 s (×1.43).
+
+Compared with the old `auto`, which always chose the GPU, the planner is 2.4–2.9× faster below
+5,000 cells and 1.13–1.43× slower above 30,000 cells. Both overheads are fixed costs. At
+65,536 cells, a 2,000-iteration run at the measured 25 ms per iteration takes about 50 s, so
+the extra 1.7 s would be about 3 %. This study measures 100 iterations, though, and by its own
+criteria the planner is not yet good enough. Possible
+fixes, not yet implemented or measured: predict from the cached CPU cost per cell before
+timing the CPU, and stop timing once one device leads by a wide margin.
+
 ## Reproduce
 
 ```bash

@@ -27,6 +27,8 @@ Re = 200, steady cylinder Re = 40, heated cavity Ra = 10⁵):
 
 ## Reading the numbers
 
+* **The cylinder case is slower with a warm start (×0.65), and the benchmark reports it as a
+  failure.** See [below](#the-cylinder-case).
 * The proxy says how much a Fluent-like segregated solver gains from the field. It is **not** a
   Fluent measurement. Fluent's coupled solver, its AMG settings and its pseudo-transient options
   will change the ratio.
@@ -38,6 +40,18 @@ Re = 200, steady cylinder Re = 40, heated cavity Ra = 10⁵):
   continuity normalisation, a warm start can look slower than it is: its first iterations
   already have a small imbalance, so it is normalised by a small number. A dash means the warm
   run reached the converged field before the normalised residuals reached the tolerance.
+
+### The cylinder case
+
+The pre-solve resolves the cylinder with 12 staircase cells per diameter, the target mesh with
+9. Converged on each grid, the flow has different recirculation lengths behind the body:
+
+--8<-- "benchmarks/results/warmstart_cylinder_wake.md"
+
+The interpolated field is the right answer on the wrong mesh. On the target mesh the wake has
+to grow by about a quarter, and SIMPLEC does that more slowly than it develops the wake from
+rest. A warm start helps when the pre-solve and the target mesh resolve the geometry alike. On
+this mesh pair they do not.
 
 ## Running the Fluent part
 
