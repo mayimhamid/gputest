@@ -6,6 +6,16 @@ Until 1.0.0, minor versions may still change the Python API; the CLI stays backw
 
 ## [Unreleased]
 
+### Added
+- `flowtrace batch` and `flowtrace.runtime.batch.run_batch`: solve many unstructured cases at
+  once, such as mesh-independence sets or `--set key=v1,v2` parameter sweeps. One GPU worker
+  takes the cases the calibrated cost model assigns to the GPU, and every other physical core
+  runs one CPU case with single-threaded BLAS. Each case writes a Fluent `.ip` file, an `.npz`
+  of all fields and a wall-force summary, and one failing case does not stop the batch.
+- `wall_forces()` on the unstructured solvers: pressure and viscous force on every wall zone,
+  from the momentum equation's own wall terms (wall-function or SST wall viscosity with
+  turbulence). It balances a body-force-driven periodic channel to 1e-8.
+
 ### Performance
 - Measured backend planner for the unstructured solver (`plan_unstructured`), used by the
   dashboard, `flowtrace solve` and `flowtrace fluent-warmstart`. Before, `backend="auto"` always

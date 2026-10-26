@@ -8,6 +8,7 @@
   flowtrace quality path/to/mesh.msh   orthogonal quality / skewness / aspect ratio (exit 2 if critical)
   flowtrace solve path/to/mesh.msh --bc inlet=inlet:1.0 --bc outlet=outlet --mu 0.01 --export out/
   flowtrace fluent-warmstart case.cas.h5 --turbulence k-omega-sst --out ws/   pre-solve for Fluent
+  flowtrace batch a.msh b.msh --set viscosity=0.1,0.05 --out runs/   many cases at once on CPU cores + GPU
   flowtrace validate                   run the validation suite (cavity, convection, Taylor-Green ...)
   flowtrace benchmark [--tier full]    reproducible benchmarks + HTML/PDF report (every published number)
 """
@@ -213,6 +214,58 @@ def _parse_bc(items):
     return out
 
 
+def cmd_batch(args):
+    import itertools
+    from dataclasses import asdict
+
+    from .runtime.batch import BatchJob, run_batch
+
+    sweeps = []
+    for item in args.set or []:
+        key, _, vals = item.partition("=")
+        sweeps.append([(key.strip(), _num(v)) for v in vals.split(",") if v.strip()])
+    jobs = []
+    for path in args.paths:
+        stem = os.path.basename(path).split(".")[0]
+        for combo in itertools.product(*sweeps) if sweeps else [()]:
+            name = stem + "".join(f"_{k}={v:g}" if isinstance(v, float) else f"_{k}={v}" for k, v in combo)
+            case = asdict(_case_from_args(args, name))
+            case.pop("backend", None)
+            for k, v in combo:
+                if k not in case:
+                    raise SystemExit(f"--set {k}: not a case parameter (e.g. viscosity, density, max_iter, tol)")
+                case[k] = v
+            jobs.append(BatchJob(name=name, mesh=os.path.abspath(path), case=case,
+                                 out_dir=os.path.abspath(args.out) if args.out else ""))
+    res = run_batch(jobs, cpu_workers=args.cpu_workers, use_gpu=False if args.no_gpu else None)
+    print()
+    print(f"{'case':<40} {'device':<6} {'cells':>8} {'its':>6} {'conv':>5} {'s':>7}  forces on walls (total)")
+    for r in res["results"]:
+        if r.get("error"):
+            print(f"{r['name']:<40} FAILED  {r['error']}")
+            continue
+        forces = "; ".join(f"{z} " + ",".join(f"{c:.5g}" for c in f["total"]) for z, f in r["wall_forces"].items())
+        print(f"{r['name']:<40} {r['device']:<6} {r['cells']:>8,} {r['iterations']:>6} {str(r['converged']):>5} "
+              f"{r['seconds']:>7.1f}  {forces}")
+    print(f"wall time {res['wall_seconds']:.1f} s")
+    if args.out:
+        os.makedirs(args.out, exist_ok=True)
+        with open(os.path.join(args.out, "batch.json"), "w", encoding="utf-8") as fh:
+            json.dump(res, fh, indent=1, default=str)
+    if any(r.get("error") for r in res["results"]):
+        sys.exit(1)
+
+
+def _num(v: str):
+    try:
+        return int(v)
+    except ValueError:
+        try:
+            return float(v)
+        except ValueError:
+            return v.strip()
+
+
 def cmd_solve(args):
     from dataclasses import asdict
 
@@ -385,6 +438,15 @@ def main(argv=None):
     physics_args(p)
     p.add_argument("--export")
     p.set_defaults(func=cmd_solve)
+    p = sub.add_parser("batch", help="solve many meshes / parameter sets at once on every CPU core and the GPU")
+    p.add_argument("paths", nargs="+", help="Fluent meshes/cases")
+    physics_args(p)
+    p.add_argument("--set", action="append", help="sweep a case parameter: key=v1,v2,..  (e.g. viscosity=0.1,0.05)")
+    p.add_argument("--out", default="", help="write <case>.ip, <case>.npz and batch.json here")
+    p.add_argument("--cpu-workers", dest="cpu_workers", type=int, default=None,
+                   help="concurrent CPU cases (default: physical cores, minus one when a GPU is used)")
+    p.add_argument("--no-gpu", dest="no_gpu", action="store_true")
+    p.set_defaults(func=cmd_batch)
     p = sub.add_parser("fluent-warmstart", help="pre-solve a Fluent case; write .ip (+.dat.h5), journal, PyFluent script")
     physics_args(p)
     p.add_argument("--out", default="flowtrace_warmstart")

@@ -1,0 +1,115 @@
+{
+ "experiment": "batch_square_cylinder",
+ "date": "2026-10-26T14:25:28",
+ "case": {
+  "viscosity": 0.1,
+  "tol": 1e-07,
+  "max_iter": 8000
+ },
+ "zone": "BluffWalls",
+ "meshes": [
+  "C:\\Users\\Hamid\\Desktop\\Square Cylinder Mesh Independency\\SquareCylinder-Coarse.msh",
+  "C:\\Users\\Hamid\\Desktop\\Square Cylinder Mesh Independency\\SquareCylinder-Medium.msh",
+  "C:\\Users\\Hamid\\Desktop\\Square Cylinder Mesh Independency\\SquareCylinder-Fine.msh",
+  "C:\\Users\\Hamid\\Desktop\\Square Cylinder Mesh Independency\\SquareCylinder-Finest.msh"
+ ],
+ "flowtrace": "0.2.0",
+ "git_commit": "57fab437ea9a40d6d075e04f525fe9e01da6fe01",
+ "git_dirty": true,
+ "python": "3.13.17",
+ "os": "Windows-11-10.0.26300-SP0",
+ "cpu": "AMD64 Family 25 Model 116 Stepping 1, AuthenticAMD",
+ "logical_cores": 16,
+ "batch_plan": {
+  "cpu_workers": 7,
+  "gpu_workers": 1,
+  "gpu_floor_ms": 18.02144999965094,
+  "cpu_us_per_cell": 1.3745166015155519,
+  "jobs": [
+   {
+    "name": "SquareCylinder-Coarse",
+    "cells": 5824,
+    "pred_cpu_ms": 8.005184687226574,
+    "prefer": "cpu"
+   },
+   {
+    "name": "SquareCylinder-Medium",
+    "cells": 10904,
+    "pred_cpu_ms": 14.987729022925578,
+    "prefer": "cpu"
+   },
+   {
+    "name": "SquareCylinder-Fine",
+    "cells": 16464,
+    "pred_cpu_ms": 22.630041327352046,
+    "prefer": "cpu"
+   },
+   {
+    "name": "SquareCylinder-Finest",
+    "cells": 22984,
+    "pred_cpu_ms": 31.591889569233444,
+    "prefer": "gpu"
+   }
+  ]
+ },
+ "sequential_seconds": 269.2427205999993,
+ "batch_seconds": 103.80415580000044,
+ "speedup": 2.5937566615227765,
+ "B1": true,
+ "B2": true,
+ "rows": [
+  {
+   "case": "SquareCylinder-Coarse",
+   "cells": 5824,
+   "seq_backend": "numba",
+   "seq_seconds": 3.7766694000001735,
+   "seq_iterations": 311,
+   "batch_device": "cpu",
+   "batch_seconds": 4.17640129999927,
+   "batch_iterations": 311,
+   "force_seq": 4.2455183058782335,
+   "force_batch": 4.245518312589916,
+   "B2": true
+  },
+  {
+   "case": "SquareCylinder-Medium",
+   "cells": 10904,
+   "seq_backend": "numba",
+   "seq_seconds": 75.0161748999999,
+   "seq_iterations": 2148,
+   "batch_device": "cpu",
+   "batch_seconds": 61.410099900000205,
+   "batch_iterations": 2146,
+   "force_seq": 4.295223693128666,
+   "force_batch": 4.295223692128481,
+   "B2": true
+  },
+  {
+   "case": "SquareCylinder-Fine",
+   "cells": 16464,
+   "seq_backend": "numba",
+   "seq_seconds": 49.93504059999941,
+   "seq_iterations": 1111,
+   "batch_device": "cpu",
+   "batch_seconds": 49.12969040000098,
+   "batch_iterations": 1111,
+   "force_seq": 4.310323716747666,
+   "force_batch": 4.310323726126315,
+   "B2": true
+  },
+  {
+   "case": "SquareCylinder-Finest",
+   "cells": 22984,
+   "seq_backend": "cupy",
+   "seq_seconds": 138.20650390000083,
+   "seq_iterations": 1664,
+   "batch_device": "gpu",
+   "batch_seconds": 101.41458669999884,
+   "batch_iterations": 1664,
+   "force_seq": 4.322338890400705,
+   "force_batch": 4.322338928260306,
+   "B2": true
+  }
+ ],
+ "reproduce": "python benchmarks/batch_study.py C:/Users/Hamid/Desktop/Square Cylinder Mesh Independency/SquareCylinder-Coarse.msh C:/Users/Hamid/Desktop/Square Cylinder Mesh Independency/SquareCylinder-Medium.msh C:/Users/Hamid/Desktop/Square Cylinder Mesh Independency/SquareCylinder-Fine.msh C:/Users/Hamid/Desktop/Square Cylinder Mesh Independency/SquareCylinder-Finest.msh --zone BluffWalls --mu 0.1"
+}

@@ -644,6 +644,39 @@ class SimpleSolver:
             out[z.name] = float(Fb[self.fv.bzone == z.id].sum())
         return out
 
+    def wall_forces(self) -> dict:
+        """Force exerted by the fluid on every wall zone (Fluent: Report > Forces), per unit depth in 2-D.
+
+        Built from the discrete terms of the momentum equation, so it balances the
+        solution exactly: the face pressure ``p_f S_f`` (the reconstructed boundary
+        pressure) plus the wall shear ``mu_w alpha_b (u_P - u_w)_t``, where ``mu_w`` is
+        the wall viscosity the momentum equation uses (laminar ``mu``, or the
+        wall-function / SST value with turbulence). Returns
+        ``{zone: {"pressure": [..], "viscous": [..], "total": [..]}}``.
+        """
+        h = self.be.to_numpy
+        fv = self.fv
+        pb = h(self._pressure_bvals(self.p, self._gp)).astype(np.float64)
+        if self.turb is not None:
+            mu_b = h(self._split_gamma(self.turb.momentum_viscosity(self.U))[1]).astype(np.float64)
+            mu_b = np.broadcast_to(mu_b, pb.shape)
+        else:
+            mu_b = np.full(pb.shape, float(self.case.viscosity))
+        Sb, nb = h(fv.Sb).astype(np.float64), h(fv.nb).astype(np.float64)
+        alpha_b = h(fv.alpha_b).astype(np.float64)
+        du = h(self.U).astype(np.float64)[h(fv.Pb)] - h(self.ub_fixed).astype(np.float64)
+        du_t = du - np.einsum("fd,fd->f", du, nb)[:, None] * nb
+        f_p = pb[:, None] * Sb  # S points out of the fluid, i.e. into the wall
+        f_v = (mu_b * alpha_b)[:, None] * du_t
+        out = {}
+        for z in self.mesh.boundary_zones():
+            m = (fv.bzone == z.id) & (self.bkind_h == WALL)
+            if not m.any():
+                continue
+            fp, fvis = f_p[m].sum(axis=0), f_v[m].sum(axis=0)
+            out[z.name] = {"pressure": fp.tolist(), "viscous": fvis.tolist(), "total": (fp + fvis).tolist()}
+        return out
+
     def heat_flow(self) -> dict:
         """Heat flow into the domain through every boundary zone (conduction + enthalpy flux).
 

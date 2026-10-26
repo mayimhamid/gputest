@@ -45,6 +45,39 @@ flowtrace solve mesh.msh --bc inlet=inlet:1.0 --bc outlet=outlet --mu 1.8e-5 --r
 
 `.msh`, legacy `.cas` (gzipped or not) and CFF `.cas.h5`/`.msh.h5` files are all accepted.
 
+## Many cases at once: `flowtrace batch`
+
+A mesh-independence study, a Reynolds-number sweep or a set of design variants is a group of
+independent solves. A single small or medium case cannot keep the machine busy: its CPU
+iteration runs on one core, and on the GPU it sits near the launch floor. `flowtrace batch`
+runs the cases concurrently. One GPU worker takes the cases the cost model says the GPU is
+faster for, largest first. Every other physical core runs one case on the CPU.
+
+```bash
+# mesh-independence study: four meshes, same physics
+flowtrace batch Coarse.msh Medium.msh Fine.msh Finest.msh --mu 0.1 --tol 1e-7 --max-iter 8000 --out runs/
+
+# Reynolds sweep on one mesh (viscosity = rho U D / Re)
+flowtrace batch Fine.msh --set viscosity=0.4,0.2,0.1333,0.1 --bc SideWalls=symmetry --out sweep/
+```
+
+| Option | Meaning |
+|---|---|
+| all `solve` options | physics and boundary conditions shared by every case |
+| `--set key=v1,v2,..` | sweep a case parameter (repeat for a full factorial) |
+| `--cpu-workers N` | concurrent CPU cases (default: physical cores, minus one that drives the GPU) |
+| `--no-gpu` | CPU workers only |
+| `--out DIR` | `<case>.ip` (Fluent interpolation file), `<case>.npz` (all fields) and `batch.json` |
+
+The summary lists each case's device, iterations, convergence and the **force on every wall
+zone** (pressure + viscous, per unit depth in 2-D). The same report is available from Python as
+`solver.wall_forces()`, the equivalent of Fluent's *Report > Forces*. It is built from the
+momentum equation's own wall terms, so a periodic channel driven by a body force balances
+exactly (test `test_wall_forces_balance_the_driving_body_force`).
+
+Each case runs in its own process with an explicit backend. Its result therefore does not
+depend on what ran beside it, apart from round-off noise of about 1e-8 between processes.
+
 ## Fluent warm start
 
 ```bash

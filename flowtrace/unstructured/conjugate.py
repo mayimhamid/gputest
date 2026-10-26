@@ -238,6 +238,10 @@ class ConjugateSolver:
     def mass_balance(self) -> dict:
         return self.flow.mass_balance()
 
+    def wall_forces(self) -> dict:
+        """Fluid forces on the walls (fluid-solid interfaces appear as ``interface-*`` zones)."""
+        return self.flow.wall_forces()
+
     def heat_flow(self) -> dict:
         """Heat flow into the domain per full-mesh boundary zone, plus the heat crossing
         every fluid-solid interface (positive from solid into fluid)."""
