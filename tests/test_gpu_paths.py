@@ -109,3 +109,19 @@ def test_planner_and_engine_with_gpu(gpu, tmp_path):
     assert job.status in ("finished", "converged"), job.error
     files = job.export_package(str(tmp_path / "out"))
     assert open(files["ip"]).readline().strip() == "3"
+
+
+def test_sst_and_p1_on_gpu_match_cpu(gpu):
+    from flowtrace.unstructured.presets import radiation_slab, turbulent_channel
+    from flowtrace.unstructured.simple import SimpleSolver
+
+    for make in (lambda: turbulent_channel(ny=24), lambda: radiation_slab(nx=12)):
+        mesh, case, _ = make()
+        a = SimpleSolver(mesh, case, backend=backend_mod.get_backend("numpy"))
+        b = SimpleSolver(mesh, case, backend=gpu)
+        for _ in range(15):
+            a.step()
+            b.step()
+        fa, fb = a.fields(), b.fields()
+        for k in fa:
+            assert np.allclose(fa[k], fb[k], rtol=1e-6, atol=1e-9), k

@@ -83,6 +83,22 @@ def preset_catalog():
     return out
 
 
+def unstructured_preset_catalog():
+    import inspect
+
+    from ..unstructured.presets import DESCRIPTIONS, PRESETS
+
+    out = []
+    for name, fn in PRESETS.items():
+        sig = inspect.signature(fn)
+        params = {k: v.default for k, v in sig.parameters.items() if k != "kw" and v.default is not inspect._empty}
+        _mesh, case, _info = fn()
+        title, desc = DESCRIPTIONS.get(name, (case.name, ""))
+        out.append({"id": name, "title": title, "params": params, "description": desc,
+                    "defaults": _jsonable(case.to_dict())})
+    return out
+
+
 def make_handler(app: AppState):
     class Handler(BaseHTTPRequestHandler):
         server_version = "FlowTrace"
@@ -136,7 +152,10 @@ def make_handler(app: AppState):
                 if path == "/api/system":
                     return self._system()
                 if path == "/api/presets":
-                    return self._json({"presets": preset_catalog()})
+                    if not hasattr(app, "_catalog"):
+                        app._catalog = {"presets": preset_catalog(),
+                                        "unstructured_presets": unstructured_preset_catalog()}
+                    return self._json(app._catalog)
                 if path == "/api/state":
                     return self._state()
                 if path == "/api/events":

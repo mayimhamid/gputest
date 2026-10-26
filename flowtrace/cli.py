@@ -4,11 +4,17 @@
   flowtrace probe                      show what FlowTrace sees on this machine
   flowtrace bench                      micro-benchmark every backend
   flowtrace run cavity --re 1000 --n 256 [--backend cupy] [--export out/]
+<<<<<<< HEAD
   flowtrace mesh path/to/mesh.msh      inspect a Fluent mesh (.msh/.cas/.cas.h5) + quality report
   flowtrace quality path/to/mesh.msh   orthogonal quality / skewness / aspect ratio (exit 2 if critical)
   flowtrace solve path/to/mesh.msh --bc inlet=inlet:1.0 --bc outlet=outlet --mu 0.01 --export out/
   flowtrace fluent-warmstart case.cas.h5 --turbulence k-omega-sst --out ws/   pre-solve for Fluent
   flowtrace batch a.msh b.msh --set viscosity=0.1,0.05 --out runs/   many cases at once on CPU cores + GPU
+=======
+  flowtrace mesh path/to/mesh.msh      inspect a Fluent mesh
+  flowtrace solve path/to/mesh.msh --bc inlet=inlet:1.0 --bc outlet=outlet --mu 0.01 --turbulence sst --export out/
+  flowtrace case turbulent_channel --param re_tau=395 --export out/   built-in Fluent-style cases
+>>>>>>> 3d528151e15014be7c185d9c110063ec4634bd8d
   flowtrace validate                   run the validation suite (cavity, convection, Taylor-Green ...)
   flowtrace benchmark [--tier full]    reproducible benchmarks + HTML/PDF report (every published number)
 """
@@ -87,9 +93,14 @@ def cmd_run(args):
         overrides["max_steps"] = args.max_steps
     spec = {"kind": "structured", "preset": args.preset, "params": params, "overrides": overrides,
             "fmg": not args.no_fmg, "mode": args.mode, "checkpoint_seconds": args.checkpoint}
-    hub = EventHub()
-    q = hub.subscribe()
-    job = Job(spec, hub, args.workdir)
+    if args.turbulence != "laminar":
+        spec.update(mode="steady-simplec", turbulence=args.turbulence)
+    _follow(Job(spec, EventHub(), args.workdir), args.export)
+
+
+def _follow(job, export=None):
+    """Run a job, stream its log/residuals to the console, optionally export for Fluent."""
+    q = job.hub.subscribe()
     job.start()
     last = 0.0
     while job.running or not q.empty():
@@ -103,17 +114,34 @@ def cmd_run(args):
         elif t == "residuals" and time.time() - last > 1.0:
             last = time.time()
             res = "  ".join(f"{k}={v:.2e}" for k, v in ev["scaled"].items())
-            print(f"[{ev['label']}] step {ev['step']:>7}  t={ev['t']:.4g}  {res}  {ev['mcells_per_s']:.2f} Mcell/s")
+            tt = ev.get("t")
+            ts = f"t={tt:.4g}  " if isinstance(tt, float) else ""
+            print(f"[{ev['label']}] step {ev['step']:>7}  {ts}{res}  {ev['mcells_per_s']:.2f} Mcell/s")
         elif t == "status" and ev["status"] in ("converged", "finished", "stopped", "error"):
             print(f"status: {ev['status']}")
     job.join()
     if job.error:
         sys.exit(1)
-    if args.export:
-        files = job.export_package(args.export)
+    if export:
+        files = job.export_package(export)
         print("Fluent package:")
         for k, v in files.items():
             print(f"  {k:<6} {v}")
+
+
+def cmd_case(args):
+    """Run a built-in Fluent-style (unstructured) case."""
+    from .runtime.engine import EventHub, Job
+
+    params = {}
+    for kv in args.param or []:
+        k, _, v = kv.partition("=")
+        params[k] = float(v) if any(ch in v for ch in ".eE") else int(v)
+    overrides = {"backend": args.backend}
+    if args.max_iter:
+        overrides["max_iter"] = args.max_iter
+    spec = {"kind": "unstructured", "preset": args.preset, "params": params, "overrides": overrides}
+    _follow(Job(spec, EventHub(), args.workdir), args.export)
 
 
 def cmd_mesh(args):
@@ -215,11 +243,16 @@ def _parse_bc(items):
             elif kind in ("outlet", "pressure"):
                 spec["pressure"] = nums[0]
         if len(parts) > 2 and parts[2]:
-            t = parts[2]
-            if t.startswith("q"):
-                spec["thermal"], spec["value"] = "flux", float(t[1:])
-            else:
-                spec["thermal"], spec["value"] = "temperature", float(t.lstrip("T"))
+            for t in parts[2].split(","):
+                if "=" in t:
+                    nm, _, val = t.partition("=")
+                    spec.setdefault("species", {})[nm] = float(val)
+                elif t.startswith("q"):
+                    spec["thermal"], spec["value"] = "flux", float(t[1:])
+                elif t.startswith("e"):
+                    spec["emissivity"] = float(t[1:])
+                else:
+                    spec["thermal"], spec["value"] = "temperature", float(t.lstrip("T"))
         out[name] = spec
     return out
 
@@ -282,6 +315,7 @@ def cmd_solve(args):
     from .mesh.fluent_h5 import read_any_mesh
     from .runtime.engine import EventHub, Job
 
+<<<<<<< HEAD
     mesh, _ = read_any_mesh(args.path)
     _apply_mesh_options(mesh, args)
     case = asdict(_case_from_args(args, os.path.basename(args.path)))
@@ -308,6 +342,20 @@ def cmd_solve(args):
     if args.export:
         for k, v in job.export_package(args.export).items():
             print(f"  {k:<6} {v}")
+=======
+    mesh = read_fluent_mesh(args.path)
+    case = {"name": os.path.basename(args.path), "boundaries": _parse_bc(args.bc), "density": args.rho,
+            "viscosity": args.mu, "energy": args.energy or args.radiation != "off", "conductivity": args.k,
+            "cp": args.cp, "max_iter": args.max_iter, "tol": args.tol, "backend": args.backend,
+            "algorithm": args.algorithm, "turbulence": args.turbulence, "turb_intensity": args.intensity,
+            "turb_viscosity_ratio": args.viscosity_ratio, "radiation": args.radiation, "absorption": args.absorption,
+            "periodic": [p.split(",") for p in (args.periodic or [])],
+            "periodic_pressure_gradient": [float(x) for x in args.dpdx.split(",")] if args.dpdx else [0.0, 0.0, 0.0],
+            "unsteady": args.unsteady, "dt": args.dt, "t_end": args.t_end, "inner_iterations": args.inner,
+            "species": [x for x in (args.species or "").split(",") if x], "species_diffusivity": args.diffusivity}
+    job = Job({"kind": "unstructured", "mesh_id": "m", "case": case}, EventHub(), args.workdir, meshes={"m": mesh})
+    _follow(job, args.export)
+>>>>>>> 3d528151e15014be7c185d9c110063ec4634bd8d
 
 
 def cmd_validate(args):
@@ -410,6 +458,8 @@ def main(argv=None):
     p.add_argument("--precision", default="auto")
     p.add_argument("--mode", default="transient", choices=["transient", "steady-simplec"])
     p.add_argument("--no-fmg", action="store_true")
+    p.add_argument("--turbulence", default="laminar", choices=["laminar", "k-omega-sst"],
+                   help="k-omega-sst switches to the steady SIMPLEC solver on the same grid")
     p.add_argument("--checkpoint", type=float, default=0.0, help="seconds between async checkpoints")
     p.add_argument("--export", help="write the Fluent hand-off package to this directory")
     p.set_defaults(func=cmd_run)
@@ -418,6 +468,7 @@ def main(argv=None):
     p.set_defaults(func=cmd_mesh)
     p = sub.add_parser("quality", help="mesh quality report (orthogonal quality, skewness, aspect ratio)")
     p.add_argument("path")
+<<<<<<< HEAD
     p.add_argument("--json", action="store_true")
     p.set_defaults(func=cmd_quality)
     p = sub.add_parser("h5-inspect", help="print the group/dataset tree of an HDF5 (.cas.h5/.dat.h5) file")
@@ -465,6 +516,41 @@ def main(argv=None):
                    help="also set the viscous/energy models in the generated Fluent scripts")
     p.add_argument("--allow-bad-mesh", dest="allow_bad_mesh", action="store_true")
     p.set_defaults(func=cmd_fluent_warmstart)
+=======
+    p.add_argument("--bc", action="append", help="zone=kind[:values[:T|q]]  e.g. inlet=inlet:1.0:T300  lid=wall:1,0")
+    p.add_argument("--rho", type=float, default=1.0)
+    p.add_argument("--mu", type=float, default=0.01)
+    p.add_argument("--k", type=float, default=0.01)
+    p.add_argument("--cp", type=float, default=1.0)
+    p.add_argument("--energy", action="store_true")
+    p.add_argument("--algorithm", default="SIMPLEC")
+    p.add_argument("--max-iter", dest="max_iter", type=int, default=3000)
+    p.add_argument("--tol", type=float, default=1e-5)
+    p.add_argument("--backend", default="auto")
+    p.add_argument("--turbulence", default="laminar", choices=["laminar", "k-omega-sst", "sst"])
+    p.add_argument("--intensity", type=float, default=0.05, help="inlet turbulence intensity (fraction)")
+    p.add_argument("--viscosity-ratio", dest="viscosity_ratio", type=float, default=10.0)
+    p.add_argument("--radiation", default="off", choices=["off", "p1"])
+    p.add_argument("--absorption", type=float, default=1.0)
+    p.add_argument("--periodic", action="append", help="pair of periodic zones: zoneA,zoneB")
+    p.add_argument("--dpdx", help="mean pressure gradient driving periodic flow, e.g. -1,0")
+    p.add_argument("--unsteady", action="store_true")
+    p.add_argument("--dt", type=float, default=0.01)
+    p.add_argument("--t-end", dest="t_end", type=float, default=1.0)
+    p.add_argument("--inner", type=int, default=20, help="iterations per time step")
+    p.add_argument("--species", help="comma-separated passive species, values via --bc zone=inlet:1.0:co2=0.1")
+    p.add_argument("--diffusivity", type=float, default=1e-5)
+    p.add_argument("--export")
+    p.set_defaults(func=cmd_solve)
+    p = sub.add_parser("case", help="run a built-in Fluent-style case (SST channel, flat plate, P-1 slab, ...)")
+    p.add_argument("preset", choices=["turbulent_channel", "flat_plate", "radiation_slab", "periodic_taylor_green",
+                                      "mixing_layer"])
+    p.add_argument("--param", action="append", help="preset parameter, e.g. re_tau=590 ny=96")
+    p.add_argument("--max-iter", dest="max_iter", type=int)
+    p.add_argument("--backend", default="auto")
+    p.add_argument("--export")
+    p.set_defaults(func=cmd_case)
+>>>>>>> 3d528151e15014be7c185d9c110063ec4634bd8d
     p = sub.add_parser("validate", help="run the validation suite")
     p.add_argument("--full", action="store_true")
     p.add_argument("--backend", default="auto")

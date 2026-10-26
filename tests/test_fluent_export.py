@@ -45,3 +45,17 @@ def test_profile_journal_and_script(tmp_path):
 def test_pyfluent_status_never_raises():
     st = pyfluent_status()
     assert isinstance(st.available, bool) and st.message
+
+
+def test_journal_and_script_with_models(tmp_path):
+    j = tmp_path / "m.jou"
+    write_journal(str(j), "m.msh", "s.ip", 50, energy=True, viscous="k-omega-sst", radiation="p1",
+                  unsteady=True, dt=0.002)
+    t = j.read_text()
+    assert "/define/models/viscous/kw-sst yes" in t and "/define/models/radiation/p1 yes" in t
+    assert "/solve/set/time-step 0.002" in t and "dual-time-iterate" in t
+    s = tmp_path / "m.py"
+    write_pyfluent_script(str(s), "m.msh", "s.ip", turbulence="k-omega-sst", radiation="p1", energy=True)
+    src = s.read_text()
+    assert 'k_omega_model = "sst"' in src and 'radiation.model = "P1"' in src
+    compile(src, "m.py", "exec")
