@@ -184,3 +184,16 @@ class FVKernels:
             if omega == 0.0:
                 break
         return x, KrylovInfo(k, rnorm / bnorm, False)
+
+
+def hllc_flux(WL, WR, n, A, gamma: float):
+    """HLLC flux (nf, dim+2) times the face areas on the GPU (CuPy arrays in and out)."""
+    import cupy as cp  # type: ignore
+
+    c = lambda a: cp.ascontiguousarray(a, dtype=cp.float64)  # noqa: E731
+    WL, WR, n, A = c(WL), c(WR), c(n), c(A)
+    out = cp.empty_like(WL)
+    nf = WL.shape[0]
+    _module.get_function("ft_hllc_flux")((min(_blocks(nf), 65535),), (THREADS,),
+                                         (np.int64(nf), np.int64(n.shape[1]), np.float64(gamma), WL, WR, n, A, out))
+    return out

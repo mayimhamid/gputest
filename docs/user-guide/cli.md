@@ -78,6 +78,24 @@ exactly (test `test_wall_forces_balance_the_driving_body_force`).
 Each case runs in its own process with an explicit backend. Its result therefore does not
 depend on what ran beside it, apart from round-off noise of about 1e-8 between processes.
 
+## Compressible flow: `flowtrace compressible`
+
+Density-based solver (HLLC, Euler / Navier–Stokes / k-ω SST) on any Fluent mesh, including
+polyhedral and axisymmetric ones; see [the theory page](../theory/compressible.md).
+
+```bash
+flowtrace compressible nozzle.msh --case nozzle.json --export out/
+```
+
+| Option | Meaning |
+|---|---|
+| `--case FILE` | JSON of `CompressibleCase` settings with a `boundaries` map (zone → kind and values) |
+| `--backend` | `numpy`, `numba`, `cupy` (default: automatic) |
+| `--export DIR` | `<mesh>.ip` for Fluent's *File → Interpolate* and `<mesh>.npz` |
+
+From Python, `BatchJob(name, mesh, case, solver="density-based")` runs compressible cases in
+`run_batch` next to pressure-based ones, on every CPU core and the GPU.
+
 ## Fluent warm start
 
 ```bash

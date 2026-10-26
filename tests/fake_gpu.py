@@ -125,6 +125,8 @@ def install():
     cscipy.fft = cfft
     cscipy.sparse = csparse
     cupyx.scipy = cscipy
+    cupyx.scatter_max = lambda a, idx, v: np.maximum.at(a, idx, v)
+    cupyx.scatter_min = lambda a, idx, v: np.minimum.at(a, idx, v)
     for name, mod in (("cupy", cupy), ("cupy.cuda", cuda), ("cupy.cuda.runtime", rt), ("cupyx", cupyx),
                       ("cupyx.scipy", cscipy), ("cupyx.scipy.fft", cfft), ("cupyx.scipy.sparse", csparse)):
         sys.modules[name] = mod

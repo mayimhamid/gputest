@@ -33,7 +33,7 @@ SOURCE = os.path.join(HERE, "fvm_kernels.cpp")
 HEADER = os.path.join(HERE, "fvm_kernels.h")
 CUDA_SOURCE = os.path.join(HERE, "fvm_kernels.cu")
 CACHE = os.path.join(os.path.expanduser("~"), ".flowtrace", "native")
-ABI = 1
+ABI = 2
 
 _lib = None
 _failure: Optional[str] = None
@@ -105,6 +105,7 @@ def _bind(lib):
         "ft_gg_gradient": ([I64, I64] + [P] * 16, None),
         "ft_assemble": ([I64, I64, I64] + [P] * 7, None),
         "ft_bicgstab_jacobi": ([I64, P, P, P, P, P, P, ctypes.c_double, I64, I, P, P, P], I),
+        "ft_hllc_flux": ([I64, I64, ctypes.c_double, P, P, P, P, P], None),
     }
     for name, (args, res) in sig.items():
         fn = getattr(lib, name)
@@ -234,3 +235,12 @@ def bicgstab_jacobi(A, b, x0, inv_diag, tol: float, maxiter: int, relative_to_in
                                 int(maxiter), int(bool(relative_to_initial)), _p(work), ctypes.byref(it),
                                 ctypes.byref(res))
     return x, KrylovInfo(int(it.value), float(res.value), bool(ok))
+
+
+def hllc_flux(WL, WR, n, A, gamma: float, lib=None) -> np.ndarray:
+    """HLLC flux (nf, dim+2) times the face areas, on the CPU (see ``ft_hllc_flux``)."""
+    lib = lib or load()
+    WL, WR, n, A = f64(WL), f64(WR), f64(n), f64(A)
+    out = np.empty_like(WL)
+    lib.ft_hllc_flux(WL.shape[0], n.shape[1], float(gamma), _p(WL), _p(WR), _p(n), _p(A), _p(out))
+    return out

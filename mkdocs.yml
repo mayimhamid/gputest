@@ -68,6 +68,7 @@ nav:
       - Structured MAC solver: theory/mac.md
       - Pressure-based unstructured solver: theory/simplec.md
       - Turbulence models: theory/turbulence.md
+      - Density-based compressible solver: theory/compressible.md
       - CHT, rotating frames, periodic zones: theory/zones.md
       - Verification methodology: theory/verification.md
   - Validation:
@@ -85,5 +86,5 @@ nav:
       - Meshes and Fluent I/O: api/mesh.md
       - Validation tools: api/validation.md
   - Design notes:
-      - Compressible flow (proposal): design/compressible-flow.md
+      - Compressible flow (original proposal): design/compressible-flow.md
   - Trademarks and licence: legal.md

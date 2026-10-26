@@ -71,6 +71,8 @@ class CompBC:
     direction: Optional[List[float]] = None
     velocity: Optional[List[float]] = None
     wall_T: Optional[float] = None
+    turb_intensity: float = 0.05  # k-omega SST inflow: k = 1.5 (I U)^2
+    turb_visc_ratio: float = 10.0  # and omega = rho k / (mu * ratio)
 
     def __post_init__(self):
         if self.kind not in BC_KINDS:
@@ -82,7 +84,8 @@ class CompressibleCase:
     name: str = "compressible case"
     boundaries: Dict[str, CompBC] = field(default_factory=dict)
     gas: GasModel = field(default_factory=GasModel)
-    viscous: bool = False  # laminar Navier-Stokes when True, Euler otherwise
+    viscous: bool = False  # Navier-Stokes when True, Euler otherwise
+    turbulence: str = "laminar"  # laminar | k-omega-sst (implies viscous)
     axisymmetric: bool = False  # 2-D meshes only: x = axis, y = radius (Fluent's convention)
     order: int = 2  # 1: first order; 2: MUSCL with limited least-squares gradients
     limiter: str = "venkatakrishnan"  # venkatakrishnan | barth | none
@@ -113,6 +116,10 @@ class CompressibleCase:
             raise ValueError("time must be steady-implicit, steady-explicit or transient")
         if self.limiter not in ("venkatakrishnan", "barth", "none"):
             raise ValueError("limiter must be venkatakrishnan, barth or none")
+        if self.turbulence not in ("laminar", "k-omega-sst"):
+            raise ValueError("turbulence must be laminar or k-omega-sst")
+        if self.turbulence != "laminar":
+            self.viscous = True
         if self.order not in (1, 2):
             raise ValueError("order must be 1 or 2")
 

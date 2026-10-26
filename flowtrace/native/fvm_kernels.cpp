@@ -38,7 +38,7 @@ inline double dot(int64_t n, const double* a, const double* b) {
 
 extern "C" {
 
-int ft_abi_version(void) { return 1; }
+int ft_abi_version(void) { return 2; }
 
 int ft_max_threads(void) {
 #ifdef _OPENMP
@@ -233,4 +233,60 @@ int ft_bicgstab_jacobi(int64_t n, const int32_t* indptr, const int32_t* indices,
     return 0;
 }
 
+
+void ft_hllc_flux(int64_t nf, int64_t dim, double g, const double* WL, const double* WR, const double* n,
+                  const double* A, double* out) {
+    const int64_t nv = dim + 2;
+#pragma omp parallel for schedule(static) if (nf > PAR_MIN)
+    for (int64_t f = 0; f < nf; ++f) {
+        const double* L = WL + f * nv;
+        const double* R = WR + f * nv;
+        const double* nn = n + f * dim;
+        double* o = out + f * nv;
+        const double rL = L[0], pL = L[nv - 1], rR = R[0], pR = R[nv - 1];
+        double unL = 0, unR = 0, qL = 0, qR = 0;
+        for (int64_t i = 0; i < dim; ++i) {
+            unL += L[1 + i] * nn[i];
+            unR += R[1 + i] * nn[i];
+            qL += L[1 + i] * L[1 + i];
+            qR += R[1 + i] * R[1 + i];
+        }
+        const double cL = std::sqrt(g * pL / rL), cR = std::sqrt(g * pR / rR);
+        const double EL = pL / (g - 1.0) + 0.5 * rL * qL, ER = pR / (g - 1.0) + 0.5 * rR * qR;
+        const double sl = std::sqrt(rL), sr = std::sqrt(rR), w = sl / (sl + sr);
+        double un_roe = 0, q_roe = 0;
+        for (int64_t i = 0; i < dim; ++i) {
+            const double u = w * L[1 + i] + (1.0 - w) * R[1 + i];
+            un_roe += u * nn[i];
+            q_roe += u * u;
+        }
+        const double H_roe = w * (EL + pL) / rL + (1.0 - w) * (ER + pR) / rR;
+        const double c_roe = std::sqrt(std::fmax((g - 1.0) * (H_roe - 0.5 * q_roe), 1e-30));
+        const double SL = std::fmin(unL - cL, un_roe - c_roe);
+        const double SR = std::fmax(unR + cR, un_roe + c_roe);
+        double den = rL * (SL - unL) - rR * (SR - unR);
+        if (den == 0.0) den = 1e-300;
+        const double SM = (pR - pL + rL * unL * (SL - unL) - rR * unR * (SR - unR)) / den;
+        // physical flux of the upwind side, plus S (Q* - Q) in the star regions
+        const bool left = SM >= 0.0;
+        const double* W = left ? L : R;
+        const double r = left ? rL : rR, p = left ? pL : pR, un = left ? unL : unR, E = left ? EL : ER;
+        const double S = left ? SL : SR;
+        const bool star = left ? (SL < 0.0) : (SR > 0.0);
+        o[0] = r * un;
+        for (int64_t i = 0; i < dim; ++i) o[1 + i] = r * W[1 + i] * un + p * nn[i];
+        o[nv - 1] = (E + p) * un;
+        if (star) {
+            double dS = S - SM;
+            if (dS == 0.0) dS = 1e-300;
+            double dU = S - un;
+            if (dU == 0.0) dU = 1e-300;
+            const double coef = r * (S - un) / dS;
+            o[0] += S * (coef - r);
+            for (int64_t i = 0; i < dim; ++i) o[1 + i] += S * (coef * (W[1 + i] + (SM - un) * nn[i]) - r * W[1 + i]);
+            o[nv - 1] += S * (coef * (E / r + (SM - un) * (SM + p / (r * dU))) - E);
+        }
+        for (int64_t k = 0; k < nv; ++k) o[k] *= A[f];
+    }
+}
 }  // extern "C"

@@ -360,6 +360,33 @@ def cmd_solve(args):
             print(f"  {k:<6} {v}")
 
 
+def cmd_compressible(args):
+    import json
+
+    from .compressible.run import build_case, solve
+    from .mesh.fluent_h5 import read_any_mesh
+
+    mesh, _ = read_any_mesh(args.path)
+    with open(args.case, encoding="utf-8") as fh:
+        spec = json.load(fh)
+    case = build_case(mesh, spec, args.backend)
+
+    def show(s):
+        print(f"it {s.iteration:>6}  cfl {s.cfl:6.1f}  "
+              + "  ".join(f"{k}={v:.2e}" for k, v in s.residuals()["scaled"].items()), flush=True)
+
+    out = solve(mesh, case, out_dir=args.export or "", name=os.path.basename(args.path).split(".")[0], callback=show)
+    s = out.pop("solver")
+    print(json.dumps(s.describe()))
+    print(f"{'converged' if out['converged'] else 'not converged'} after {out['iterations']} iterations "
+          f"({out['solve_seconds']:.1f} s)")
+    for z, m in out["mass_balance"].items():
+        print(f"  mass flow out of {z:<24} {m: .6e} kg/s" + (" per radian" if case.axisymmetric else ""))
+    for k in ("ip", "npz"):
+        if k in out:
+            print(f"  {k:<4} {out[k]}")
+
+
 def cmd_validate(args):
     from .validation.suite import run_suite
 
@@ -509,6 +536,12 @@ def main(argv=None):
     physics_args(p)
     p.add_argument("--export")
     p.set_defaults(func=cmd_solve)
+    p = sub.add_parser("compressible", help="density-based solve (HLLC, Euler / NS / k-omega SST) on a Fluent mesh")
+    p.add_argument("path")
+    p.add_argument("--case", required=True, help="JSON of CompressibleCase settings and per-zone boundaries")
+    p.add_argument("--backend", default=None)
+    p.add_argument("--export", help="directory for <mesh>.ip (Fluent interpolation file) and <mesh>.npz")
+    p.set_defaults(func=cmd_compressible)
     p = sub.add_parser("case", help="run a built-in Fluent-style case (SST channel, flat plate, P-1 slab, ...)")
     p.add_argument("preset", choices=["turbulent_channel", "flat_plate", "radiation_slab", "periodic_taylor_green",
                                       "mixing_layer"])

@@ -189,3 +189,26 @@ def test_simplec_gpu_with_cuda_kernels_equals_cupy_reference():
     for k in ("x-velocity", "y-velocity", "pressure"):
         fa, fb = a.fields()[k], b.fields()[k]
         assert np.abs(fa - fb).max() <= 1e-9 * max(np.abs(fb).max(), 1.0), k
+
+
+def test_cuda_hllc_kernel_matches_array_path():
+    import cupy as cp
+
+    from flowtrace.compressible import CompressibleCase, CompressibleSolver
+    from flowtrace.mesh.unstructured import cartesian_mesh_2d
+    from flowtrace.native import cuda
+
+    if not cuda.available():
+        pytest.skip(cuda.failure_reason() or "CUDA kernels unavailable")
+    rng = np.random.default_rng(3)
+    nf, dim = 20000, 3
+    W = lambda: np.column_stack([rng.uniform(.1, 2, nf), rng.normal(0, 400, (nf, dim)), rng.uniform(1e4, 3e5, nf)])  # noqa: E731
+    WL, WR = W(), W()
+    n = rng.normal(size=(nf, dim))
+    n /= np.linalg.norm(n, axis=1)[:, None]
+    A = rng.uniform(.1, 2, nf)
+    s = CompressibleSolver(cartesian_mesh_2d(2, 2), CompressibleCase(backend="numpy"))
+    s.dim = dim
+    ref = s._hllc(WL, WR, n) * A[:, None]
+    got = cp.asnumpy(cuda.hllc_flux(cp.asarray(WL), cp.asarray(WR), cp.asarray(n), cp.asarray(A), 1.4))
+    assert np.allclose(got, ref, rtol=1e-11, atol=1e-9 * np.abs(ref).max())

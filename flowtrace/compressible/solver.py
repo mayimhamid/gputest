@@ -91,6 +91,7 @@ class CompressibleSolver:
         self.d_len = xp.sqrt(xp.sum(fv.d * fv.d, axis=1))
         self.db_len = xp.maximum(xp.abs(xp.sum(fv.db * self.n_b, axis=1)), 1e-300)
         self._build_boundaries()
+        self.flux_kernel = self._pick_flux_kernel()
         # initial field
         u0 = (list(case.init_velocity) + [0.0] * 3)[:dim]
         W = np.zeros((self.nc, self.nvar))
@@ -107,6 +108,14 @@ class CompressibleSolver:
         self._last_res: Dict[str, float] = {}
         self._prev_rmax = math.inf
         self.history = []
+        self.mdot_i = xp.zeros(fv.P.shape[0], dtype=self.dtype)
+        self.mdot_b = xp.zeros(fv.n_bf, dtype=self.dtype)
+        self.W_last = self.prim(self.Q)
+        self.turb = None
+        if case.turbulence == "k-omega-sst":
+            from .sst import CompressibleSST
+
+            self.turb = CompressibleSST(self)
         self.setup_seconds = time.perf_counter() - t0
 
     def initialize(self, rho, velocity, p) -> None:
@@ -281,6 +290,30 @@ class CompressibleSolver:
         return xp.where((SL >= 0)[:, None], FL, xp.where((SM >= 0)[:, None], FsL,
                                                           xp.where((SR > 0)[:, None], FsR, FR)))
 
+    def _pick_flux_kernel(self) -> str:
+        """native C++/OpenMP (NumPy, FP64), CUDA (CuPy, FP64) or the vectorised array code."""
+        if self.dtype != np.float64:
+            return "array"
+        from .. import native
+
+        if self.xp is np:
+            return "native-cpu" if native.available() else "array"
+        from ..native import cuda
+
+        return "native-cuda" if cuda.available() else "array"
+
+    def _flux(self, WL, WR, n, A):
+        """HLLC flux times the face areas, on the fastest available kernel."""
+        if self.flux_kernel == "native-cpu":
+            from .. import native
+
+            return native.hllc_flux(WL, WR, n, A, self.gamma)
+        if self.flux_kernel == "native-cuda":
+            from ..native import cuda
+
+            return cuda.hllc_flux(WL, WR, n, A, self.gamma)
+        return self._hllc(WL, WR, n) * A[:, None]
+
     def _viscosity(self, T):
         g = self.case.gas
         if not g.sutherland:
@@ -340,8 +373,9 @@ class CompressibleSolver:
             Wgb = self._ghost(WbL)
         else:
             WL, WR, WbL, Wgb = W[P], W[N], WP_b, Wg
-        F = self._hllc(WL, WR, self.n_i) * self.A_i[:, None]
-        Fb = self._hllc(WbL, Wgb, self.n_b) * self.A_b[:, None]
+        F = self._flux(WL, WR, self.n_i, self.A_i)
+        Fb = self._flux(WbL, Wgb, self.n_b, self.A_b)
+        self.mdot_i, self.mdot_b, self.grad_last, self.W_last = F[:, 0], Fb[:, 0], grad, W
         if self.case.viscous:
             Fv, Fvb = self._viscous_fluxes(W, grad, Wface_b, WP_b, Wg)
             F = F - Fv * self.A_i[:, None]
@@ -352,7 +386,7 @@ class CompressibleSolver:
             src = W[:, -1]
             if self.case.viscous:
                 T = W[:, -1] / (W[:, 0] * self.R)
-                mu = self._viscosity(T)
+                mu = self._viscosity(T) + (self.turb.mut if self.turb is not None else 0.0)
                 r = xp.maximum(fv.xc[:, 1], 1e-30)
                 div = grad[:, 1, 0] + grad[:, 2, 1] + W[:, 2] / r
                 src = src - 2.0 * mu * (W[:, 2] / r - div / 3.0)
@@ -379,7 +413,9 @@ class CompressibleSolver:
         u_f = 0.5 * (W[P, 1:1 + d] + W[N, 1:1 + d])
         T_f = 0.5 * (T[P] + T[N])
         r_f = fv.xf[:, 1] if self.case.axisymmetric else None
-        Fv = self._tau_flux(gu_f, gT_f, u_f, T_f, self.n_i, r_f)
+        mut = self.turb.mut if self.turb is not None else None
+        mut_f = None if mut is None else 0.5 * (mut[P] + mut[N])
+        Fv = self._tau_flux(gu_f, gT_f, u_f, T_f, self.n_i, r_f, mut_f)
         # boundary faces: one-sided gradients towards the face value
         Tb_g = Wg[:, -1] / (Wg[:, 0] * R)
         Tf_b = 0.5 * (T[Pb] + Tb_g)
@@ -392,14 +428,18 @@ class CompressibleSolver:
         gT_b = xp.where(adiabatic[:, None], gT_b - xp.sum(gT_b * self.n_b, axis=1)[:, None] * self.n_b, gT_b)
         noflux = (self.bcode == SLIP) | (self.bcode == FARFIELD) | (self.bcode == P_OUT)
         rb = fv.xfb[:, 1] if self.case.axisymmetric else None
-        Fvb = self._tau_flux(gu_b, gT_b, uf_b, Tf_b, self.n_b, rb)
+        mut_b = None if mut is None else xp.where(self.bcode == WALL, 0.0, mut[Pb])
+        Fvb = self._tau_flux(gu_b, gT_b, uf_b, Tf_b, self.n_b, rb, mut_b)
         Fvb = xp.where(noflux[:, None], 0.0 * Fvb, Fvb)  # zero viscous stress on symmetry, far field, outlets
         return Fv, Fvb
 
-    def _tau_flux(self, gu, gT, u, T, n, r=None):
+    def _tau_flux(self, gu, gT, u, T, n, r=None, mut=None):
         xp, d = self.xp, self.dim
         mu = self._viscosity(T)
         k = mu * self.case.gas.cp / self.case.gas.prandtl
+        if mut is not None:
+            k = k + mut * self.case.gas.cp / self.turb.prandtl_t
+            mu = mu + mut
         div = xp.einsum("fii->f", gu)
         if r is not None:  # axisymmetric: + v / r
             div = div + xp.where(r > 1e-30, u[:, 1] / xp.where(r > 1e-30, r, 1.0), gu[:, 1, 1])
@@ -423,7 +463,8 @@ class CompressibleSolver:
         lamb = (xp.abs(xp.sum(W[Pb, 1:1 + d] * self.n_b, axis=1)) + c[Pb]) * self.A_b
         if self.case.viscous:
             T = W[:, -1] / (W[:, 0] * self.R)
-            nu = self._viscosity(T) / W[:, 0] * max(4.0 / 3.0, g / self.case.gas.prandtl)
+            mu = self._viscosity(T) + (self.turb.mut if self.turb is not None else 0.0)
+            nu = mu / W[:, 0] * max(4.0 / 3.0, g / self.case.gas.prandtl)
             lam = lam + 2.0 * xp.maximum(nu[P], nu[N]) * self.A_i / self.d_len
             lamb = lamb + 2.0 * nu[Pb] * self.A_b / self.db_len
         return lam, lamb
@@ -470,6 +511,12 @@ class CompressibleSolver:
             self._step_rk3(global_dt=False)
         else:
             self._step_implicit()
+        if self.turb is not None:
+            W = self.prim(self.Q)
+            dt, _, _, _ = self._local_dt(W, self.cfl)
+            if c.time == "transient":
+                dt = self.xp.full(self.nc, float(self.xp.min(dt)) if c.dt is None else float(c.dt), dtype=self.dtype)
+            self._last_turb = self.turb.update(self.W_last, self.grad_last, dt)
         self.timers["iteration"] += time.perf_counter() - t0
         self.iteration += 1
 
@@ -525,16 +572,21 @@ class CompressibleSolver:
         self.Q = Q + self._positive(Q, dQ)
 
     def _record(self, R) -> float:
-        """Scaled residuals: RMS per equation, divided by its largest value over the first 5 iterations."""
+        """Scaled residuals: RMS per equation, divided by its largest value over the first 5 iterations.
+
+        The momentum components share one scale (the largest of them): a component that starts at
+        round-off level, such as w in a quasi-2-D 3-D case, would otherwise never fall below 1."""
         xp = self.xp
         rms = xp.sqrt(xp.mean(R * R, axis=0))
         names = ["continuity"] + ["x-momentum", "y-momentum", "z-momentum"][:self.dim] + ["energy"]
         vals = [float(v) for v in self.be.to_numpy(rms)]
-        res = {}
-        for nm, v in zip(names, vals):
-            if self.iteration < 5 or nm not in self._res0:
+        if self.iteration < 5 or not self._res0:
+            for nm, v in zip(names, vals):
                 self._res0[nm] = max(self._res0.get(nm, 0.0), v, 1e-300)
-            res[nm] = v / self._res0[nm]
+            mom = max(self._res0[nm] for nm in names[1:-1])
+            for nm in names[1:-1]:
+                self._res0[nm] = mom
+        res = {nm: v / self._res0[nm] for nm, v in zip(names, vals)}
         self._last_res = res
         rmax = max(res.values())
         if not math.isfinite(rmax):
@@ -561,6 +613,7 @@ class CompressibleSolver:
 
     def residuals(self) -> dict:
         r = dict(self._last_res)
+        r.update(getattr(self, "_last_turb", {}))
         return {"raw": r, "scaled": r, "normalized": r}
 
     def fields(self, names=None) -> Dict[str, np.ndarray]:
@@ -575,6 +628,8 @@ class CompressibleSolver:
         vm = np.linalg.norm(W[:, 1:1 + d], axis=1)
         out["velocity-magnitude"] = vm
         out["mach-number"] = vm / np.sqrt(g * W[:, -1] / W[:, 0])
+        if self.turb is not None:
+            out.update(self.turb.fields())
         if names:
             out = {k: v for k, v in out.items() if k in names}
         return out
@@ -599,7 +654,8 @@ class CompressibleSolver:
     def describe(self) -> dict:
         c = self.case
         return {"solver": "density-based " + ("Navier-Stokes" if c.viscous else "Euler")
+                + (" + k-omega SST" if self.turb is not None else "")
                 + (" axisymmetric" if c.axisymmetric else ""), "flux": "HLLC",
-                "order": c.order, "limiter": c.limiter, "time": c.time, "backend": self.be.name,
+                "flux_kernel": self.flux_kernel, "order": c.order, "limiter": c.limiter, "time": c.time, "backend": self.be.name,
                 "device": self.be.device, "precision": str(self.dtype), "cells": self.nc, "dim": self.dim,
                 "setup_seconds": round(self.setup_seconds, 3)}

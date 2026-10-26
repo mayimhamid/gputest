@@ -37,6 +37,7 @@ class BatchJob:
     mesh: str  # path of a Fluent mesh/case (.msh, .cas, .cas.h5, .msh.h5)
     case: dict = field(default_factory=dict)  # UnstructuredCase keyword arguments (boundaries as dicts)
     out_dir: str = ""  # if set: <out_dir>/<name>.ip (Fluent interpolation file) and <name>.npz
+    solver: str = "pressure-based"  # or "density-based": CompressibleCase keyword arguments in ``case``
 
 
 def _run_one(job: dict, backend: str) -> dict:
@@ -52,6 +53,16 @@ def _run_one(job: dict, backend: str) -> dict:
         from ..unstructured.conjugate import make_solver
 
         mesh, _ = read_any_mesh(job["mesh"])
+        if job.get("solver", "pressure-based") == "density-based":
+            from ..compressible.run import build_case, solve
+
+            out = solve(mesh, build_case(mesh, job.get("case"), backend), out_dir=job.get("out_dir") or "",
+                        name=job["name"], backend=get_backend(backend))
+            out.pop("solver")
+            out.pop("describe")
+            res.update(out)
+            res["seconds"] = time.perf_counter() - t0
+            return res
         kw = dict(job.get("case") or {})
         bnd = default_boundaries(mesh)
         for k, v in (kw.pop("boundaries", None) or {}).items():
