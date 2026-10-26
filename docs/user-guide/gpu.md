@@ -41,12 +41,9 @@ iterations stayed the same and wall time dropped 15–50 %.
 
 A SIMPLEC iteration on the GPU launches thousands of small kernels and synchronises with the
 host for every Krylov dot product. Its cost therefore has a **floor that does not shrink with
-the mesh**. Measured on an RTX 4060 Laptop GPU in FP64, cavity, ms per iteration:
+the mesh**. Cavity, FP64, ms per iteration, measured by `benchmarks/simplec_iteration_cost.py`:
 
-| cells | 1 024 | 4 096 | 16 384 | 65 536 | 262 144 |
-|---|---:|---:|---:|---:|---:|
-| CPU (NumPy) | 4.0 | 11.4 | 39.7 | 235 | 861 |
-| GPU (CuPy) | 52.4 | 60.6 | 52.8 | 55.2 | 61.1 |
+--8<-- "benchmarks/results/simplec_iteration_cost.md"
 
 So the planner for unstructured cases:
 

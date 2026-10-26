@@ -12,9 +12,12 @@ Re = 200, steady cylinder Re = 40, heated cavity Ra = 10⁵):
 2. **Proxy measurement (always runs).** The `.ip` file is interpolated onto a *different*
    unstructured mesh: triangles, or a 0.75× coarser quad mesh. FlowTrace's SIMPLEC solver,
    from the same algorithm family as Fluent's default pressure-based solver, then runs twice.
-   The cold run starts from rest and stops at scaled residuals of 10⁻⁵. The warm run starts
-   from the interpolated field and stops when it reaches the cold run's *absolute* final
-   residuals. It is also checked that both runs converge to the same solution.
+   The cold run starts from rest and is converged tightly (scaled residuals of 10⁻⁷); its
+   final field is the reference answer. The warm run starts from the interpolated field. **Both
+   runs are counted until the velocity (and temperature) field is within 10⁻⁴ (relative, max
+   norm) of that answer.** This measures what matters, the solution, and is immune to
+   residual-normalisation artefacts. The usual "iterations until the scaled residuals reach
+   10⁻⁵" are listed as well.
 3. **Fluent measurement (needs a licence).** The same cold/warm pair in Ansys Fluent through
    PyFluent, or by running `cold.jou`/`warm.jou` and `flowtrace parse-transcript cold.trn warm.trn`.
 
@@ -30,9 +33,11 @@ Re = 200, steady cylinder Re = 40, heated cavity Ra = 10⁵):
 * The FlowTrace pre-solve time is listed next to the savings, so the net benefit can be judged.
   The pre-solve is worthwhile when the expensive solver's iterations cost more than the
   FlowTrace solve, which is the usual case for large Fluent meshes and licensed core-hours.
-* The normalised-residual count (in brackets) shows the pitfall described in
-  [Fluent workflow](../user-guide/fluent.md#measuring-the-benefit). Judged by Fluent's default
-  continuity normalisation, a warm start can look slower even when it is not.
+* The "warm to tol." column shows the pitfall described in
+  [Fluent workflow](../user-guide/fluent.md#measuring-the-benefit). Judged by Fluent-style
+  continuity normalisation, a warm start can look slower than it is: its first iterations
+  already have a small imbalance, so it is normalised by a small number. A dash means the warm
+  run reached the converged field before the normalised residuals reached the tolerance.
 
 ## Running the Fluent part
 

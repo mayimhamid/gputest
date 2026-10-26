@@ -135,8 +135,9 @@ for k, v in report["files"].items():
     """md:## How much does the warm start save?
 
 Fluent itself needs a licence, so the measurement below uses FlowTrace's own SIMPLEC solver as a
-proxy. The `.ip` file is interpolated onto a *different* mesh, and the warm run is counted until
-it reaches the absolute residual level of the converged cold run.""",
+proxy. The `.ip` file is interpolated onto a *different* mesh. The cold run is converged tightly
+and its final field is the reference answer; both runs are counted until the velocity field is
+within 10⁻⁴ (relative, max norm) of that answer.""",
     """from flowtrace.fluent import warmstart_study as W
 W.CASES["tutorial"] = {"title": "cavity Re=100", "preset": "cavity", "params": {"re": 100, "n": 48},
                        "target": {"kind": "tri", "n": 32}}

@@ -273,14 +273,15 @@ class TurbulenceModel:
             diag[fc] = diag[fc] + big
             rhs[fc] = rhs[fc] + big * xp.asarray(fixed_vals, dtype=s.dtype)
         A = fv.matrix(diag, aPN, aNP)
+        # residual over the cells the equation actually controls: not the fixed near-wall
+        # cells, and not cells held at the lower bound (e.g. free-stream k decaying to the
+        # floor upstream of a flat plate), whose clipped residual can never vanish
+        mask = phi > floor * (1.0 + 1e-9)
         if fixed_cells is not None and fixed_cells.size:
-            mask = xp.ones(s.nc, dtype=bool)
             mask[xp.asarray(fixed_cells)] = False
-            r = xp.abs(rhs - A @ phi)[mask]
-            den = xp.abs(diag * phi)[mask]
-            res = float(xp.sum(r)) / max(float(xp.sum(den)), 1e-300)
-        else:
-            res = s._residual(A, diag, phi, rhs)
+        r = xp.abs(rhs - A @ phi)[mask]
+        den = xp.abs(diag * phi)[mask]
+        res = float(xp.sum(r)) / max(float(xp.sum(den)), 1e-300)
         dr = diag / relax
         Ar = fv.matrix(dr, aPN, aNP)
         b = rhs + ((1.0 - relax) / relax) * diag * phi

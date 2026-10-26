@@ -136,7 +136,8 @@ def test_warm_start_proxy_small(tmp_path, monkeypatch):
     r = W.run_proxy_case("tiny", str(tmp_path / "tiny"), backend="numpy", tol=1e-5)
     assert r.cold_converged and r.warm_converged
     assert r.warm_iterations < r.cold_iterations
-    assert r.max_velocity_difference < 1e-3
+    assert r.max_velocity_difference <= W.FIELD_TOL
+    assert r.cold_iterations_tol and r.cold_iterations <= r.cold_iterations_tol + 10
     for f in ("flowtrace.msh", "flowtrace.ip", "cold.jou", "warm.jou", "case.json"):
         assert (tmp_path / "tiny" / f).exists(), f
     jou = (tmp_path / "tiny" / "warm.jou").read_text()

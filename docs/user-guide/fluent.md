@@ -67,5 +67,5 @@ Results without Fluent stay **labelled placeholders**. See the [study page](../v
     Fluent normalises the continuity residual by its largest value in the first five
     iterations. A warm start begins with a small imbalance, so its *normalised* residual looks
     worse than it is. Compare absolute residuals, or a physical monitor such as drag, Nusselt
-    number or mass imbalance. FlowTrace's study counts iterations to the cold run's absolute
-    residual level.
+    number or mass imbalance. FlowTrace's study counts iterations until the field itself is
+    within 10⁻⁴ of the converged solution.

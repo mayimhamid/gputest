@@ -778,14 +778,17 @@ def b_cht_channel(ctx):
 @benchmark("warmstart_proxy", "Warm start: FlowTrace .ip -> SIMPLEC on another mesh (proxy for Fluent)",
            "fluent", tiers=("full",))
 def b_warmstart(ctx):
-    from ..fluent.warmstart_study import run_study
+    from ..fluent.warmstart_study import FIELD_TOL, run_study
 
-    data = run_study("benchmarks/fluent_warmstart", backend=_be(ctx).name, verbose=False)
+    out = ctx.get("out_dir")
+    folder = os.path.join(os.path.dirname(os.path.abspath(out)), "fluent_warmstart") if out else "benchmarks/fluent_warmstart"
+    data = run_study(folder, backend=_be(ctx).name, verbose=False)
     r = BenchResult("warmstart_proxy", "", "fluent")
     for p in data["proxy"]:
-        r.metrics[f"{p['case']}: iterations saved (cold / warm)"] = _m(p["speedup"], None, "x", "> 1", p["speedup"] > 1)
-        r.metrics[f"{p['case']}: warm vs cold solution max |du|/|u|"] = _m(p["max_velocity_difference"], 0.0, "",
-                                                                          "< 1e-3", p["max_velocity_difference"] < 1e-3)
+        r.metrics[f"{p['case']}: iterations to the converged field, cold / warm"] = _m(
+            p["speedup"], None, "x", "> 1", p["speedup"] > 1, f"field within {FIELD_TOL:g} of the converged solution")
+        r.metrics[f"{p['case']}: warm run reaches the cold-start solution"] = _m(
+            p["max_velocity_difference"], 0.0, "", f"<= {FIELD_TOL:g}", p["warm_converged"])
     r.details = data
     return r
 
@@ -825,7 +828,7 @@ def run_benchmarks(ids: Optional[List[str]] = None, tier: str = "quick", backend
         missing = set(ids) - set(REGISTRY)
         if missing:
             raise KeyError(f"unknown benchmark(s): {sorted(missing)}; have {sorted(REGISTRY)}")
-    ctx = {"tier": tier, "backend": backend, "cpu_backend": "numba" if _has_numba() else "numpy"}
+    ctx = {"tier": tier, "backend": backend, "cpu_backend": "numba" if _has_numba() else "numpy", "out_dir": out_dir}
     results = []
     for b in sel:
         t0 = time.perf_counter()

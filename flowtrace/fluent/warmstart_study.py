@@ -21,9 +21,11 @@ Two measurements, kept strictly apart:
 Fair convergence criterion: Fluent (and FlowTrace) normalise the continuity
 residual by its largest value in the first five iterations. A warm start
 begins with a small imbalance, so the *normalised* residual looks worse than
-it is. The study therefore counts iterations until the warm run reaches the
-same **absolute** residual level the cold run ended with, and reports the
-naive normalised count as well.
+it is, and absolute residual levels differ by round-off between two runs.
+The study therefore measures the answer itself: both runs are counted until
+the velocity (and temperature) field is within ``FIELD_TOL`` (relative, max
+norm) of the converged solution, taken from the cold run converged to 1e-7.
+The usual residual-tolerance counts are reported as well.
 """
 
 from __future__ import annotations
@@ -65,19 +67,24 @@ class ProxyResult:
     cells_source: int
     cells_target: int
     flowtrace_seconds: float  # MAC solve + export
-    cold_iterations: int
-    warm_iterations: int  # to the cold run's absolute residual level (fair)
-    warm_iterations_normalised: Optional[int]  # to the same normalised tolerance (naive)
+    cold_iterations: int  # until the field is within FIELD_TOL of the converged solution
+    warm_iterations: int  # same criterion, starting from the interpolated .ip field
+    cold_iterations_tol: Optional[int]  # until the scaled residuals reach the tolerance (what a user sees)
+    warm_iterations_normalised: Optional[int]  # same, warm run (continuity normalised by its first iterations)
     cold_seconds: float
     warm_seconds: float
     cold_converged: bool
     warm_converged: bool
-    max_velocity_difference: float  # |u_warm - u_cold|_inf / |u|_inf at convergence
+    max_velocity_difference: float  # |u_warm - u_ref|_inf / |u_ref|_inf at the end of the warm run
+    stride: int = 1  # field snapshots of the cold run every `stride` iterations (count resolution)
     package: Dict[str, str] = field(default_factory=dict)
 
     @property
     def speedup(self) -> float:
         return self.cold_iterations / max(self.warm_iterations, 1)
+
+
+FIELD_TOL = 1e-4  # relative max-norm distance to the converged field that counts as "converged"
 
 
 def _structured_case(spec):
@@ -145,33 +152,46 @@ def run_proxy_case(name: str, out_dir: str, backend: str = "auto", tol: float = 
 
     mesh = _target_mesh(case, spec)
     be = get_backend(backend if backend != "auto" else "numpy")
-    # cold
-    cold = SimpleSolver(mesh, _ucase(case, max_iter, tol), backend=be)
+
+    def state(solver):
+        f = solver.fields()
+        parts = [f["velocity-magnitude"]] + ([f["temperature"]] if "temperature" in f else [])
+        return [p.astype(np.float32) for p in parts]
+
+    def distance(a, ref):
+        return max(float(np.abs(x - r).max() / max(float(np.abs(r).max()), 1e-30)) for x, r in zip(a, ref))
+
+    # cold: from rest to a tight tolerance; that run's final field is the reference answer, and its
+    # snapshots tell when it first came within FIELD_TOL of it
+    stride = max(1, mesh.n_cells // 2000)
+    cold = SimpleSolver(mesh, _ucase(case, max_iter, min(tol, 1e-7)), backend=be)
+    snaps, n_cold_tol = [], None
     t1 = time.perf_counter()
     while not cold.finished:
         cold.step()
+        if n_cold_tol is None and cold.iteration > 5 and max(cold.residuals()["scaled"].values()) < tol:
+            n_cold_tol = cold.iteration
+        if cold.iteration % stride == 0:
+            snaps.append((cold.iteration, state(cold)))
     cold_s = time.perf_counter() - t1
-    target_abs = cold.residuals()["raw"]
-    # warm: interpolate the .ip file onto the target cells
-    warm = SimpleSolver(mesh, _ucase(case, max_iter, tol), backend=be)
+    ref = state(cold)
+    n_cold = next((it for it, s in snaps if distance(s, ref) <= FIELD_TOL), cold.iteration)
+    del snaps
+    # warm: interpolate the .ip file onto the target cells, iterate until within FIELD_TOL
+    warm = SimpleSolver(mesh, _ucase(case, max_iter, min(tol, 1e-7)), backend=be)
     warm.initialize(interpolate_ip_file(pkg["ip"], warm.cell_centres()))
     t2 = time.perf_counter()
-    n_norm = None
+    n_norm, d = None, float("inf")
     while warm.iteration < max_iter:
         warm.step()
-        raw, scaled = warm.residuals()["raw"], warm.residuals()["scaled"]
-        if n_norm is None and warm.iteration > 5 and max(scaled.values()) < tol:
+        if n_norm is None and warm.iteration > 5 and max(warm.residuals()["scaled"].values()) < tol:
             n_norm = warm.iteration
-        ok = all(raw[k] <= max(target_abs[k], 1e-300) * (1 + 1e-9) for k in raw if k != "continuity")
-        ok = ok and raw["continuity"] <= target_abs["continuity"] * (1 + 1e-9)
-        if warm.iteration > 5 and ok:
+        d = distance(state(warm), ref)
+        if d <= FIELD_TOL:
             break
     warm_s = time.perf_counter() - t2
-    uc = cold.fields()["velocity-magnitude"]
-    uw = warm.fields()["velocity-magnitude"]
-    diff = float(np.abs(uc - uw).max() / max(np.abs(uc).max(), 1e-30))
-    res = ProxyResult(name, spec["title"], case.nx * case.ny, mesh.n_cells, ft_seconds, cold.iteration,
-                      warm.iteration, n_norm, cold_s, warm_s, cold.converged, warm.iteration < max_iter, diff,
+    res = ProxyResult(name, spec["title"], case.nx * case.ny, mesh.n_cells, ft_seconds, n_cold, warm.iteration,
+                      n_cold_tol, n_norm, cold_s, warm_s, cold.converged, d <= FIELD_TOL, d, stride,
                       {k: os.path.relpath(v, out_dir) for k, v in pkg.items()})
     write_fluent_case_files(out_dir, case, mesh_file=os.path.basename(pkg["msh"]),
                             ip_file=os.path.basename(pkg["ip"]), tol=tol)
@@ -391,14 +411,19 @@ def run_study(out_dir: str = "benchmarks/fluent_warmstart", cases: Optional[List
 
 def render_markdown(data: dict) -> str:
     L = ["### Proxy: FlowTrace SIMPLEC, cold start vs warm start from the FlowTrace `.ip` file", "",
-         "Measured. The warm run is counted until it reaches the absolute residual level of the converged cold run "
-         "(normalised-residual count in brackets).", "",
-         "| Case | Target cells | Cold iterations | Warm iterations | Saved | FlowTrace pre-solve | Max \\|Δu\\|/\\|u\\| |",
-         "|---|---|---|---|---|---|---|"]
+         f"Measured. Both runs are counted until the velocity (and temperature) field is within {FIELD_TOL:g} "
+         "(relative, max norm) of the converged solution. The last two columns count iterations until the "
+         "scaled residuals reach the tolerance, which is what a solver's convergence monitor shows; the warm "
+         "count there is distorted by the continuity normalisation (see the text).", "",
+         "| Case | Target cells | Cold | Warm | Saved | FlowTrace pre-solve | Cold to tol. | Warm to tol. |",
+         "|---|---|---|---|---|---|---|---|"]
     for r in data["proxy"]:
-        nn = f" ({r['warm_iterations_normalised']})" if r.get("warm_iterations_normalised") else ""
-        L.append(f"| {r['title']} | {r['cells_target']:,} | {r['cold_iterations']:,} | {r['warm_iterations']:,}{nn} | "
-                 f"x{r['speedup']:.1f} | {r['flowtrace_seconds']:.1f} s | {r['max_velocity_difference']:.1e} |")
+        def n(v):
+            return f"{v:,}" if v else "-"
+        warm = f"{r['warm_iterations']:,}" + ("" if r.get("warm_converged", True) else " (not reached)")
+        L.append(f"| {r['title']} | {r['cells_target']:,} | {r['cold_iterations']:,} | {warm} | "
+                 f"x{r['speedup']:.1f} | {r['flowtrace_seconds']:.1f} s | {n(r.get('cold_iterations_tol'))} | "
+                 f"{n(r.get('warm_iterations_normalised'))} |")
     L += ["", "### Ansys Fluent: cold start vs `.ip` warm start", ""]
     if all(r["status"] != "measured" for r in data["fluent"]):
         reason = data["fluent"][0]["message"] if data["fluent"] else ""
