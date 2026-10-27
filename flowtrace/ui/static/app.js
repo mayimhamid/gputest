@@ -274,8 +274,72 @@ async function renderMeshInfo(info) {
   $("#caseTitle").textContent = info.name;
   if (info.dim === 2) {
     S.geometry = parseGeometry(await api(`/api/mesh/${info.id}`));
-    S.cellPaths = null; S.frame = null; draw();
+    S.geom3 = null; S.cellPaths = null; S.frame = null; draw();
+  } else {
+    // 3-D: a picture of the boundary surfaces (sampled face centres, one colour per zone)
+    const g = await api(`/api/mesh/${info.id}`);
+    S.geometry = null; S.frame = null;
+    S.geom3 = { names: g.names, types: g.types, pts: b64f32(g.pts), zid: b64i32(g.zid), n: g.n, yaw: -0.6, pitch: 0.35, zoom: 1 };
+    fitMesh3D(S.geom3); $("#empty").classList.add("hidden"); draw();
   }
+}
+function fitMesh3D(g) {
+  // frame the walls (the body) when there are any, otherwise everything
+  const walls = g.types.map((ty, i) => (ty === "wall" ? i : -1)).filter((i) => i >= 0);
+  const use = (z) => (walls.length ? walls.includes(z) : true);
+  const lo = [1e300, 1e300, 1e300], hi = [-1e300, -1e300, -1e300];
+  for (let i = 0; i < g.n; i++) if (use(g.zid[i])) for (let d = 0; d < 3; d++) {
+    const v = g.pts[3 * i + d]; if (v < lo[d]) lo[d] = v; if (v > hi[d]) hi[d] = v;
+  }
+  g.c = lo.map((v, d) => 0.5 * (v + hi[d]));
+  g.r = Math.max(hi[0] - lo[0], hi[1] - lo[1], hi[2] - lo[2], 1e-12) * 0.5 * 1.3;
+}
+const ZONE_HUES = [210, 20, 140, 50, 280, 0, 170, 320, 90, 240];
+function drawMesh3D(ctx, W, H, g) {
+  const cy = Math.cos(g.yaw), sy = Math.sin(g.yaw), cp = Math.cos(g.pitch), sp = Math.sin(g.pitch);
+  const sc = 0.5 * Math.min(W, H) / g.r * g.zoom;
+  const hidden = g.hidden || new Set();
+  const order = g.names.map((_, i) => i);
+  for (const z of order) {
+    if (hidden.has(z)) continue;
+    ctx.fillStyle = `hsl(${ZONE_HUES[z % ZONE_HUES.length]} 70% 60%)`;
+    for (let i = 0; i < g.n; i++) {
+      if (g.zid[i] !== z) continue;
+      const x = g.pts[3 * i] - g.c[0], y = g.pts[3 * i + 1] - g.c[1], zz = g.pts[3 * i + 2] - g.c[2];
+      const x1 = cy * x + sy * zz, z1 = -sy * x + cy * zz;
+      const y2 = cp * y - sp * z1;
+      const px = W / 2 + sc * x1, py = H / 2 - sc * y2;
+      if (px < -2 || px > W + 2 || py < -2 || py > H + 2) continue;
+      ctx.fillRect(px, py, 1.6, 1.6);
+    }
+  }
+  ctx.font = "12px system-ui, sans-serif";
+  g.names.forEach((nm, z) => {
+    ctx.fillStyle = hidden.has(z) ? "#667" : `hsl(${ZONE_HUES[z % ZONE_HUES.length]} 70% 60%)`;
+    ctx.fillText("■ " + nm + (g.types[z] ? " (" + g.types[z] + ")" : ""), 10, 18 + 16 * z);
+  });
+  ctx.fillStyle = "#8a97a8";
+  ctx.fillText("drag: rotate · wheel: zoom · double-click: reset · click a legend entry: show/hide", 10, H - 10);
+}
+function bindMesh3DControls() {
+  const cv = $("#view"); let drag = null;
+  cv.addEventListener("pointerdown", (e) => { if (S.geom3 && !S.frame) { drag = [e.clientX, e.clientY]; cv.setPointerCapture(e.pointerId); } });
+  cv.addEventListener("pointermove", (e) => {
+    if (!drag || !S.geom3) return;
+    S.geom3.yaw += (e.clientX - drag[0]) * 0.01; S.geom3.pitch += (e.clientY - drag[1]) * 0.01;
+    drag = [e.clientX, e.clientY]; draw();
+  });
+  cv.addEventListener("pointerup", () => { drag = null; });
+  cv.addEventListener("wheel", (e) => {
+    if (!S.geom3 || S.frame) return; e.preventDefault();
+    S.geom3.zoom *= Math.exp(-e.deltaY * 0.001); draw();
+  }, { passive: false });
+  cv.addEventListener("dblclick", () => { if (S.geom3) { S.geom3.zoom = 1; S.geom3.yaw = -0.6; S.geom3.pitch = 0.35; draw(); } });
+  cv.addEventListener("click", (e) => {
+    const g = S.geom3; if (!g || S.frame) return;
+    const r = cv.getBoundingClientRect(), z = Math.floor((e.clientY - r.top - 8) / 16);
+    if (e.clientX - r.left < 220 && z >= 0 && z < g.names.length) { g.hidden = g.hidden || new Set(); g.hidden.has(z) ? g.hidden.delete(z) : g.hidden.add(z); draw(); }
+  });
 }
 function renderZoneTable(info) {
   const t = $("#zoneTable");
@@ -574,6 +638,7 @@ function draw() {
   const cmap = lut($("#cmapSelect").value);
   if (f && f.mesh === "structured") drawStructured(ctx, W, H, f, cmap);
   else if (S.geometry) drawUnstructured(ctx, W, H, f, cmap);
+  else if (S.geom3) drawMesh3D(ctx, W, H, S.geom3);
   drawColorbar(f, cmap);
   if (f) $("#view").setAttribute("aria-label", `${t("fieldImage")} ${f.field}: ${fmt(f.min, 4)} … ${fmt(f.max, 4)}`);
 }
@@ -794,7 +859,7 @@ async function restoreState() {
 }
 function init() {
   applyI18n();
-  initTabs(); initMeshUpload(); initHover();
+  initTabs(); initMeshUpload(); initHover(); bindMesh3DControls();
   $("#langBtn").addEventListener("click", () => setLang(LANG === "fa" ? "en" : "fa"));
   $("#themeBtn").addEventListener("click", cycleTheme);
   $("#projectsBtn").addEventListener("click", () => { $("#projectMsg").textContent = ""; refreshProjects().catch((e) => { $("#projectMsg").textContent = e.message; }); $("#projectsDialog").showModal(); });

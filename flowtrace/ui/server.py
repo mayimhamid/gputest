@@ -34,6 +34,8 @@ import zipfile
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse
 
+import numpy as np
+
 from ..runtime.engine import EventHub, Job, _jsonable
 
 STATIC = os.path.join(os.path.dirname(__file__), "static")
@@ -211,7 +213,7 @@ def make_handler(app: AppState):
                     if mesh is None:
                         return self._error("unknown mesh", 404)
                     if mesh.dim != 2:
-                        return self._json({"dim": 3})
+                        return self._json(surface_preview(mesh))
                     return self._json(Job.mesh_geometry_event(mesh))
                 return self._error("not found", 404)
             except (BrokenPipeError, ConnectionResetError):
@@ -403,6 +405,34 @@ def make_handler(app: AppState):
 # --------------------------------------------------------------------------
 
 HDF5_MAGIC = b"\x89HDF\r\n\x1a\n"
+
+
+def surface_preview(mesh, per_zone: int = 30000) -> dict:
+    """Boundary-face centres of a 3-D mesh, at most ``per_zone`` evenly spaced per zone, for the
+    dashboard's mesh picture (a 10M-face mesh cannot be drawn face by face in a browser)."""
+    import base64
+
+    nb = np.nonzero(mesh.neighbour < 0)[0]
+    pts, zid, names, kinds = [], [], [], []
+    ptr, fn, X = mesh.face_ptr, mesh.face_nodes, mesh.nodes
+    for z in mesh.boundary_zones():
+        idx = nb[mesh.face_zone[nb] == z.id]
+        if idx.size == 0:
+            continue
+        if idx.size > per_zone:
+            idx = idx[np.linspace(0, idx.size - 1, per_zone).astype(np.int64)]
+        cnt = ptr[idx + 1] - ptr[idx]
+        start = np.cumsum(cnt) - cnt
+        node = fn[np.repeat(ptr[idx], cnt) + np.arange(int(cnt.sum())) - np.repeat(start, cnt)]
+        c = np.add.reduceat(X[node], start, axis=0) / cnt[:, None]
+        pts.append(c.astype(np.float32))
+        zid.append(np.full(len(idx), len(names), dtype=np.int32))
+        names.append(z.name)
+        kinds.append(z.type)
+    P = np.concatenate(pts) if pts else np.zeros((0, 3), np.float32)
+    enc = lambda a: base64.b64encode(np.ascontiguousarray(a).tobytes()).decode()  # noqa: E731
+    return {"dim": 3, "names": names, "types": kinds, "n": int(P.shape[0]), "pts": enc(P),
+            "zid": enc(np.concatenate(zid) if zid else np.zeros(0, np.int32))}
 
 
 def register_mesh(app: AppState, raw: bytes, name: str) -> dict:
