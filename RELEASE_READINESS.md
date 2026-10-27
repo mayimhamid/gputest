@@ -1,6 +1,6 @@
 # FlowTrace release readiness, October 2026
 
-**Final status: `READY WITH DOCUMENTED LIMITATIONS`** (provisional: confirmed or revised when the full validation tier, now running on the release code, is pushed to this PR)
+**Final status: `READY WITH DOCUMENTED LIMITATIONS`** (confirmed by the full validation tier on the release code: 69 of 70 checks pass in 66 min on a 4-core Xeon; the k-ε flat plate now passes at −4.96 %, the cylinder warm start still fails at ×0.65; warm-start wall-time ratio cold / (pre-solve + warm) 0.05-0.52, i.e. no wall-time saving on these small cases)
 
 This report records what was checked before tagging the next FlowTrace release, how it was
 checked, what was found and fixed, and what is still open. Every number in it comes from a

@@ -8,7 +8,7 @@
 ![License](https://img.shields.io/badge/license-MIT-green)
 ![Backends](https://img.shields.io/badge/backends-NumPy%20%7C%20Numba%20%7C%20CuPy%2FCUDA-blue)
 ![Tests](https://img.shields.io/badge/tests-207%20passing-brightgreen)
-![Benchmarks](https://img.shields.io/badge/validation-68%2F70%20checks%20pass-yellowgreen)
+![Benchmarks](https://img.shields.io/badge/validation-69%2F70%20checks%20pass-yellowgreen)
 
 [English](README.md) · [فارسی](README.fa.md) · [Documentation](docs/index.md) · [Validation report](docs/validation/index.md) · [Changelog](CHANGELOG.md) · [Release readiness](RELEASE_READINESS.md)
 
@@ -36,10 +36,8 @@ this repository.
   ([solver diagnostics](docs/theory/diagnostics.md)).
 * **Checked against the classic references.** These include Ghia's cavity, de Vahl Davis's
   natural convection and the Moser–Kim–Mansour channel DNS. They also cover flat-plate
-  skin-friction correlations and the Driver & Seegmiller step. **68 of 70 acceptance checks pass
-  in the committed full run.** The two failures are listed below, not hidden. That run predates
-  this release's fixes; the re-run on the release code is in progress and will replace the
-  numbers below.
+  skin-friction correlations and the Driver & Seegmiller step. **69 of 70 acceptance checks pass
+  on the release code.** The one failure, the cylinder warm start, is listed below, not hidden.
 * **A companion for Fluent.** FlowTrace writes Fluent's own `.ip` interpolation file, plus a
   journal and a PyFluent script that open *your* case. In the proxy study the FlowTrace field
   cut the iterations to the converged solution by ×1.4 to ×2.4 in four of five cases. In the

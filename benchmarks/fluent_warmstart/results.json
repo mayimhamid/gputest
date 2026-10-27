@@ -5,13 +5,13 @@
    "title": "Lid-driven cavity, Re = 400",
    "cells_source": 4096,
    "cells_target": 3200,
-   "flowtrace_seconds": 8.156361900000775,
+   "flowtrace_seconds": 19.872054825000305,
    "cold_iterations": 1162,
    "warm_iterations": 488,
    "cold_iterations_tol": 960,
    "warm_iterations_normalised": 417,
-   "cold_seconds": 6.918498900002305,
-   "warm_seconds": 2.049753100000089,
+   "cold_seconds": 18.33692671200015,
+   "warm_seconds": 5.611036715999944,
    "cold_converged": true,
    "warm_converged": true,
    "max_velocity_difference": 9.942905307980254e-05,
@@ -24,20 +24,24 @@
     "csv": "flowtrace_cells.csv",
     "readme": "README_FLUENT.txt"
    },
-   "speedup": 2.3811475409836067
+   "cold_solver_seconds": 13.130281734001528,
+   "warm_solver_seconds": 5.515749423008401,
+   "interpolation_seconds": 0.07154561099969214,
+   "speedup": 2.3811475409836067,
+   "wallclock_ratio": 0.5157351545391321
   },
   {
    "case": "channel",
    "title": "Developing channel flow, Re = 100",
    "cells_source": 2048,
    "cells_target": 1152,
-   "flowtrace_seconds": 0.3790064999993774,
+   "flowtrace_seconds": 0.8952414039999894,
    "cold_iterations": 68,
    "warm_iterations": 47,
    "cold_iterations_tol": 77,
    "warm_iterations_normalised": null,
-   "cold_seconds": 0.31979320000027656,
-   "warm_seconds": 0.14560509999864735,
+   "cold_seconds": 1.167844235999837,
+   "warm_seconds": 0.42992915800004994,
    "cold_converged": true,
    "warm_converged": true,
    "max_velocity_difference": 9.47683583945036e-05,
@@ -50,23 +54,27 @@
     "csv": "flowtrace_cells.csv",
     "readme": "README_FLUENT.txt"
    },
-   "speedup": 1.446808510638298
+   "cold_solver_seconds": 0.6900848380000753,
+   "warm_solver_seconds": 0.4238753679992442,
+   "interpolation_seconds": 0.049127442999633786,
+   "speedup": 1.446808510638298,
+   "wallclock_ratio": 0.5043579431473397
   },
   {
    "case": "step",
    "title": "Backward-facing step, Re = 200 (laminar)",
    "cells_source": 10240,
    "cells_target": 5616,
-   "flowtrace_seconds": 224.23682109999936,
+   "flowtrace_seconds": 245.88006820900046,
    "cold_iterations": 772,
-   "warm_iterations": 418,
-   "cold_iterations_tol": 617,
-   "warm_iterations_normalised": 366,
-   "cold_seconds": 8.066698000002361,
-   "warm_seconds": 3.2295971999992616,
+   "warm_iterations": 419,
+   "cold_iterations_tol": 608,
+   "warm_iterations_normalised": 372,
+   "cold_seconds": 35.85743220599943,
+   "warm_seconds": 15.926980516000185,
    "cold_converged": true,
    "warm_converged": true,
-   "max_velocity_difference": 9.984512871596962e-05,
+   "max_velocity_difference": 9.844238957157359e-05,
    "stride": 2,
    "package": {
     "msh": "flowtrace.msh",
@@ -76,20 +84,24 @@
     "csv": "flowtrace_cells.csv",
     "readme": "README_FLUENT.txt"
    },
-   "speedup": 1.8468899521531101
+   "cold_solver_seconds": 28.900988178987973,
+   "warm_solver_seconds": 15.793096148002405,
+   "interpolation_seconds": 0.2573439679999865,
+   "speedup": 1.8424821002386635,
+   "wallclock_ratio": 0.11033838083163526
   },
   {
    "case": "cylinder",
    "title": "Cylinder in a channel, Re = 40 (steady)",
    "cells_source": 18432,
    "cells_target": 10308,
-   "flowtrace_seconds": 331.8898558999972,
+   "flowtrace_seconds": 561.140988612,
    "cold_iterations": 700,
    "warm_iterations": 1085,
    "cold_iterations_tol": 886,
    "warm_iterations_normalised": null,
-   "cold_seconds": 36.031466100001126,
-   "warm_seconds": 21.31880699999965,
+   "cold_seconds": 80.45435049099979,
+   "warm_seconds": 46.303026386000056,
    "cold_converged": true,
    "warm_converged": true,
    "max_velocity_difference": 9.801668784348294e-05,
@@ -102,23 +114,27 @@
     "csv": "flowtrace_cells.csv",
     "readme": "README_FLUENT.txt"
    },
-   "speedup": 0.6451612903225806
+   "cold_solver_seconds": 30.946966674001487,
+   "warm_solver_seconds": 45.778028085995174,
+   "interpolation_seconds": 0.5748354380002638,
+   "speedup": 0.6451612903225806,
+   "wallclock_ratio": 0.05094202445866663
   },
   {
    "case": "heated",
    "title": "Natural convection, Ra = 1e5 (heated cavity)",
    "cells_source": 4096,
    "cells_target": 3200,
-   "flowtrace_seconds": 4.034803799997462,
+   "flowtrace_seconds": 12.002985875000377,
    "cold_iterations": 316,
-   "warm_iterations": 158,
-   "cold_iterations_tol": 276,
+   "warm_iterations": 160,
+   "cold_iterations_tol": 275,
    "warm_iterations_normalised": null,
-   "cold_seconds": 3.324791200000618,
-   "warm_seconds": 1.192051400001219,
+   "cold_seconds": 10.437031498000579,
+   "warm_seconds": 3.310011388000021,
    "cold_converged": true,
    "warm_converged": true,
-   "max_velocity_difference": 9.946875798050314e-05,
+   "max_velocity_difference": 9.95240334304981e-05,
    "stride": 1,
    "package": {
     "msh": "flowtrace.msh",
@@ -128,7 +144,11 @@
     "csv": "flowtrace_cells.csv",
     "readme": "README_FLUENT.txt"
    },
-   "speedup": 2.0
+   "cold_solver_seconds": 7.367843159002405,
+   "warm_solver_seconds": 3.267046746997039,
+   "interpolation_seconds": 0.07719430499946611,
+   "speedup": 1.975,
+   "wallclock_ratio": 0.48007651115406624
   }
  ],
  "fluent": [
@@ -175,28 +195,27 @@
  ],
  "tolerance": 1e-05,
  "machine": {
-  "date": "2026-10-26T06:23:39",
-  "os": "Windows 11",
+  "date": "2026-10-27T06:45:34",
+  "os": "Linux 6.18.44-fc-v165",
   "python": "3.13.17",
-  "cpu": "AMD Ryzen 9 7940HS w/ Radeon 780M Graphics",
-  "cores": "8C/16T",
-  "ram_gb": 15.2,
-  "gpu": "NVIDIA GeForce RTX 4060 Laptop GPU",
+  "cpu": "Intel(R) Xeon(R) Processor @ 2.80GHz",
+  "cores": "4C/4T",
+  "ram_gb": 15.7,
+  "gpu": null,
   "backends": [
    "numpy",
-   "numba",
-   "cupy"
+   "numba"
   ],
   "libraries": {
-   "numpy": "2.5.4",
+   "numpy": "2.5.3",
    "scipy": "1.18.1",
    "numba": "0.68.0",
-   "cupy": "14.2.0",
+   "cupy": null,
    "pyamg": "5.3.0",
    "psutil": "7.2.2",
    "pyfluent": null
   },
-  "flowtrace": "0.2.0",
-  "platform": "Windows-11-10.0.26300-SP0"
+  "flowtrace": "0.3.0",
+  "platform": "Linux-6.18.44-fc-v165-x86_64-with-glibc2.39"
  }
 }
