@@ -7,7 +7,7 @@ window.FT_I18N = {
     run: "Run", stop: "Stop", tabCase: "Case", tabSolver: "Solver", tabHardware: "Hardware", tabFluent: "Fluent",
     caseSource: "Case source", builtin: "Built-in case", fluentMesh: "Fluent mesh", case: "Case",
     gridRun: "Grid & run control", endTime: "End time (blank = steady)", maxSteps: "Max steps", steadyTol: "Steady tolerance",
-    meshTitle: "Fluent mesh (.msh / .cas / .cas.h5)", dropMesh: "Drop a Fluent mesh here or click to choose",
+    meshTitle: "Fluent mesh (.msh / .cas / .cas.h5 / .txt)", dropMesh: "Drop a Fluent mesh here or click to choose",
     bcs: "Boundary conditions", solids: "Solid zones (conjugate heat transfer)", materials: "Material & models",
     density: "Density", viscosity: "Dynamic viscosity", turbulence: "Turbulence model", laminar: "Laminar",
     energyEq: "Energy equation", conductivity: "Conductivity", cp: "Specific heat cp",

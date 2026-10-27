@@ -211,3 +211,16 @@ def test_skewness_is_not_applied_to_polyhedral_cells():
     assert n_poly == 2 and q.skewness_not_applicable_cells == n_poly
     assert 0.0 < q.max_skewness <= mesh_quality(m3).max_skewness  # the remaining (warped) hexes keep theirs
     assert any("not evaluated" in w for w in q.warnings) and q.ok
+
+
+def test_text_file_with_fluent_mesh_content_is_read(tmp_path):
+    """The readers sniff the content, not the extension: a Fluent ASCII mesh saved as .txt loads."""
+    import shutil
+
+    from flowtrace.ui.server import AppState, register_mesh
+
+    txt = tmp_path / "cavity.txt"
+    shutil.copy(os.path.join(EXAMPLES, "cavity_quad.msh"), txt)
+    mesh, fmt = read_any_mesh(str(txt))
+    assert fmt == "fluent-msh" and mesh.n_cells == 1600
+    assert register_mesh(AppState(str(tmp_path)), txt.read_bytes(), "cavity.txt")["cells"] == 1600
