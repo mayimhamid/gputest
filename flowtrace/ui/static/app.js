@@ -294,7 +294,7 @@ function fitMesh3D(g) {
   g.c = lo.map((v, d) => 0.5 * (v + hi[d]));
   g.r = Math.max(hi[0] - lo[0], hi[1] - lo[1], hi[2] - lo[2], 1e-12) * 0.5 * 1.3;
 }
-const ZONE_HUES = [210, 20, 140, 50, 280, 0, 170, 320, 90, 240];
+const ZONE_HUES = [18, 200, 140, 45, 280, 350, 170, 320, 90, 235];
 function drawMesh3D(ctx, W, H, g) {
   const cy = Math.cos(g.yaw), sy = Math.sin(g.yaw), cp = Math.cos(g.pitch), sp = Math.sin(g.pitch);
   const sc = 0.5 * Math.min(W, H) / g.r * g.zoom;
@@ -315,10 +315,10 @@ function drawMesh3D(ctx, W, H, g) {
   }
   ctx.font = "12px system-ui, sans-serif";
   g.names.forEach((nm, z) => {
-    ctx.fillStyle = hidden.has(z) ? "#667" : `hsl(${ZONE_HUES[z % ZONE_HUES.length]} 70% 60%)`;
+    ctx.fillStyle = hidden.has(z) ? cssVar("--line") : `hsl(${ZONE_HUES[z % ZONE_HUES.length]} 70% 60%)`;
     ctx.fillText("■ " + nm + (g.types[z] ? " (" + g.types[z] + ")" : ""), 10, 18 + 16 * z);
   });
-  ctx.fillStyle = "#8a97a8";
+  ctx.fillStyle = cssVar("--muted");
   ctx.fillText("drag: rotate · wheel: zoom · double-click: reset · click a legend entry: show/hide", 10, H - 10);
 }
 function bindMesh3DControls() {
@@ -565,7 +565,7 @@ function logLine(ev) {
   while (c.childNodes.length > 400) c.removeChild(c.firstChild);
   c.scrollTop = c.scrollHeight;
 }
-const TIMER_COLORS = ["#3fb6ff", "#7c5cff", "#34d399", "#fbbf24", "#f87171", "#22d3ee", "#e879f9"];
+const TIMER_COLORS = ["#e07b53", "#7aa6c2", "#7fb685", "#e3b45a", "#c9788a", "#8f8bb5", "#b9b29a"];
 function drawTimers(t) {
   const entries = Object.entries(t).filter(([, v]) => v > 0);
   const tot = entries.reduce((a, [, v]) => a + v, 0) || 1;
