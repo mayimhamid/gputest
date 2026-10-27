@@ -159,3 +159,24 @@ def test_memory_budget_falls_back_to_the_cpu_then_refuses_with_advice(gpu, monke
     monkeypatch.setenv("FLOWTRACE_MEMORY_CHECK", "off")
     plan, solver = plan_unstructured(*_cavity(backend="numpy"))
     assert solver.be.device == "cpu" and any("running anyway" in a for a in plan.memory["numpy"]["advice"])
+
+
+def test_guard_falls_back_to_simple_on_a_high_reynolds_skewed_elbow():
+    """Two-inlet elbow (648 cells, 45 deg non-orthogonality) at nu = 0.01 in mm units, Re ~ 1e4:
+    SIMPLEC diverges at every relax_p down to the guard's floor. The guard then switches to SIMPLE
+    with momentum relaxation 0.3, which converges."""
+    import os
+
+    from flowtrace.mesh.fluent_h5 import read_any_mesh
+    from flowtrace.unstructured.case import default_boundaries
+
+    mesh, _ = read_any_mesh(os.path.join(os.path.dirname(__file__), "..", "examples", "elbow-mix.msh.txt"))
+    b = default_boundaries(mesh)
+    for k in ("inf1", "inf2"):
+        b[k] = BoundarySpec("inlet", normal_speed=1.0)
+    case = UnstructuredCase(boundaries=b, viscosity=0.01, max_iter=1500, tol=1e-6, backend="numpy")
+    s = SimpleSolver(mesh, case)
+    while not s.finished:
+        s.step()
+    assert s.converged and s.algo == "SIMPLE" and s.relax_u <= 0.3 and s.guard_events
+    assert np.isfinite(s.fields()["velocity-magnitude"]).all()

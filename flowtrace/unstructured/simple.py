@@ -548,7 +548,7 @@ class SimpleSolver:
             src = src + self.turb.transpose_stress(gU)
         res = {}
         Ustar = xp.empty_like(U)
-        au = c.relax_u
+        au = self.relax_u
         diag, aPN, aNP, Db = self._coefficients(gm, self.m_dirvel)
         rhs_all = [self._rhs(gm, U[:, k], gU[k], ub[:, k], Db, src[:, k]) for k in range(dim)]
         tcoef = self._time_coeffs()
@@ -581,7 +581,7 @@ class SimpleSolver:
         tm["momentum"] += t2 - t1
 
         # ---------------- Rhie-Chow fluxes ----------------
-        if c.algorithm == "SIMPLEC":
+        if self.algo == "SIMPLEC":
             sum_nb = fv.scatter(-aPN, -aNP)
             denom = diag_r - sum_nb
             denom = xp.where(denom > 1e-12 * diag_r, denom, diag_r)
@@ -708,9 +708,13 @@ class SimpleSolver:
     GUARD_EVERY = 20  # snapshot interval (iterations), taken only while the residual is healthy
     GUARD_FACTOR = 0.6
     GUARD_MIN_RELAX = 0.1
+    GUARD_FALLBACK = True  # after relax_p reaches its floor: SIMPLEC -> SIMPLE (relax_u 0.3), then lower relax_u
+    GUARD_MIN_RELAX_U = 0.2  # once relax_p is at its floor the guard lowers the momentum relaxation too
 
     def _reset_guard(self):
         self.guard_events = []
+        self.algo = self.case.algorithm  # the guard may fall back from SIMPLEC to SIMPLE
+        self.relax_u = self.case.relax_u  # lowered by the guard on convection-dominated, skewed cases
         self.guard_exhausted_at = None  # iteration at which divergence was seen with relax_p at its floor
         self._guard_min = float("inf")
         self._guard_snap = (self.state_dict(), float("inf")) if self.guard_enabled else None
@@ -742,6 +746,26 @@ class SimpleSolver:
             self._guard_min = snap_r
             self.guard_events.append({"detected_at": at, "restored_to": int(snap["iteration"]),
                                       "relax_p": round(self.relax_p, 4), "continuity": r})
+            return True
+        stage2 = self.GUARD_FALLBACK and (self.algo == "SIMPLEC" or self.relax_u * 0.7 >= self.GUARD_MIN_RELAX_U - 1e-12)
+        if bad and self._guard_snap is not None and stage2:
+            # relax_p is at its floor. A high-Reynolds flow on a coarse or skewed mesh (elbow,
+            # Re ~ 1e4) needs the classical robust setting: SIMPLE with momentum relaxation 0.3
+            # (measured: converges in ~340 iterations where SIMPLEC at any relax_p diverged); a
+            # case that is already SIMPLE gets its momentum relaxation lowered instead.
+            snap, snap_r = self._guard_snap
+            at = self.iteration
+            self.load_state(snap)
+            self.iteration = self.step_count = at
+            if self.algo == "SIMPLEC":
+                self.algo, self.relax_u, self.relax_p = "SIMPLE", min(self.relax_u, 0.3), 0.3
+            else:
+                self.relax_u *= 0.7
+            self._amg_age = 10 ** 9
+            self._guard_min = snap_r
+            self.guard_events.append({"detected_at": at, "restored_to": int(snap["iteration"]), "algorithm": self.algo,
+                                      "relax_p": round(self.relax_p, 4), "relax_u": round(self.relax_u, 4),
+                                      "continuity": r})
             return True
         if bad and self.guard_exhausted_at is None:  # cannot lower relax_p further: record it, do not roll back
             self.guard_exhausted_at = self.iteration
@@ -821,7 +845,7 @@ class SimpleSolver:
     def describe(self) -> dict:
         amg = self._amg
         return {
-            "solver": f"pressure-based {self.case.algorithm}",
+            "solver": f"pressure-based {self.algo}",
             "turbulence": self.case.turbulence,
             "backend": self.be.name, "device": self.be.device, "precision": str(self.dtype),
             "cells": self.nc, "faces": self.mesh.n_faces, "dim": self.dim,

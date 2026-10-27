@@ -278,6 +278,7 @@ def test_divergence_report_names_the_guard_state_and_the_skew():
     assert "set explicitly" in msg and "45.0 deg" in msg and "cos^2" in msg
     s = sheared()
     s.GUARD_MIN_RELAX = 0.45  # the guard reaches its floor before the stable 0.29
+    s.GUARD_FALLBACK = False  # ... and may not fall back to SIMPLE
     diverge(s)
     assert s.guard_exhausted_at is not None and s.guard_events
     assert "could not go lower" in divergence_context(s) and s.describe()["stability_guard_exhausted_at"]
