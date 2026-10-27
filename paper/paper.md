@@ -61,8 +61,10 @@ FlowTrace addresses this gap in three ways:
    differently. The Fluent measurement has not been made yet.
 2. **Measured, not assumed, hardware placement.** For a 1024² lid-driven cavity, the MAC
    solver on a laptop GPU (RTX 4060, FP32) was measured about 30× faster per time step than
-   the 16-thread CPU path (Numba, FP64). For grids of 128² and smaller the CPU is faster, and
-   the planner chooses accordingly. A SIMPLEC iteration on the same GPU costs at least about
+   the 16-thread CPU path (Numba, FP64). That is not an equal-accuracy comparison. FlowTrace
+   now runs FP64 unless FP32 is shown to meet the case's own convergence tolerance, which FP32
+   failed to do in five of six steady test cases. For grids of 128² and smaller the CPU is
+   faster, and the planner chooses accordingly. A SIMPLEC iteration on the same GPU costs at least about
    15 ms, so the unstructured solver gains from it only above about 16,000 cells. Fused CUDA
    kernels, compiled at run time with NVRTC, replace launch-bound vectorised code in the
    stencils. They were ported only after profiling, and they come with equality tests

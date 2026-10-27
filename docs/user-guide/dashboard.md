@@ -3,6 +3,25 @@
 `flowtrace` (or `start_flowtrace.bat` on Windows) opens a local web dashboard at
 <http://127.0.0.1:8765>. It runs offline, loads no external scripts and binds to localhost only.
 
+## Security
+
+The dashboard can start runs and write files in its work directory, and it has **no
+authentication**. It is meant for one user on their own machine:
+
+* It binds to `127.0.0.1` by default.
+* Bound to loopback, it refuses (HTTP 403) every request whose `Host` header is not a loopback
+  name. A web page therefore cannot reach it by pointing a domain at 127.0.0.1 (DNS rebinding).
+* It refuses every request whose `Origin` header, when present, does not match `Host`, including
+  `Origin: null` from sandboxed pages and local files. Another web page therefore cannot send
+  it commands (cross-site requests).
+* The dashboard's own page passes both checks: open it as `http://127.0.0.1:8765` or
+  `http://localhost:8765`.
+* `flowtrace ui --host <address>` with an address other than loopback refuses to start unless
+  you add `--allow-remote`, and then prints a warning. Anyone who can reach that address can
+  run cases and write files. Use it only on a network you control, preferably behind an
+  authenticating reverse proxy or an SSH tunnel (`ssh -L 8765:127.0.0.1:8765 host`), which
+  keeps the server on loopback.
+
 ## Layout
 
 * **Case** – built-in cases, or drag and drop a Fluent mesh (`.msh`, `.cas`, `.cas.h5`). Zones are

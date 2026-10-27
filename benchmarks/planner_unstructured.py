@@ -29,6 +29,11 @@ any study numbers were taken.
 
 Run:  python benchmarks/planner_unstructured.py [--sizes 32,64,...] [--iters 100] [--repeats 3]
 Writes benchmarks/results/planner_unstructured.{json,md}.
+
+On a machine without a GPU, ``--modes numpy,auto --name planner_unstructured_cpu_only`` measures
+what the planner costs there (oracle = the fixed CPU run) without touching the GPU study.
+Every run also records where its time went: mesh generation, planning (solver construction
+and the timed iterations, which are real iterations the run keeps) and the remaining solve.
 """
 
 from __future__ import annotations
@@ -56,8 +61,10 @@ t0 = time.perf_counter()  # device initialisation (CUDA context) is inside the t
 mesh = cartesian_mesh_2d(n, n)
 case = UnstructuredCase(boundaries={"top": BoundarySpec("wall", velocity=[1.0, 0.0])}, viscosity=0.01,
                         max_iter=iters, tol=0.0, backend=mode)
+t_mesh = time.perf_counter() - t0
 plan, s = plan_unstructured(mesh, case)
 t_plan = time.perf_counter() - t0
+it_plan = s.iteration
 while not s.finished:
     s.step()
 s.be.synchronize()
@@ -75,6 +82,8 @@ np.save(sys.argv[4], u)
 print(json.dumps({"n": n, "cells": mesh.n_cells, "mode": mode, "backend": plan.backend, "device": plan.device,
                   "reason": plan.reason, "measured_ms": plan.measured_ms_per_iteration, "skipped": plan.skipped,
                   "plan_seconds": t_plan, "total_seconds": total, "iterations": s.iteration,
+                  "mesh_seconds": t_mesh, "planning_seconds": t_plan - t_mesh, "iterations_done_while_planning": it_plan,
+                  "solve_seconds": total - t_plan,
                   "peak_rss_bytes": peak_rss, "gpu_pool_bytes": gpu_pool}))
 """
 
@@ -101,14 +110,14 @@ def _environment():
             "libraries": libs, "on_battery": p.on_battery, "calibration": calibrate_unstructured()}
 
 
-def run(sizes, iters, repeats, out_dir):
+def run(sizes, iters, repeats, out_dir, modes=("numpy", "cupy", "auto"), name="planner_unstructured"):
     import numpy as np
 
     tmp = os.path.join(out_dir, "_fields")
     os.makedirs(tmp, exist_ok=True)
     rows = []
     for n in sizes:
-        for mode in ("numpy", "cupy", "auto"):
+        for mode in modes:
             for r in range(repeats):
                 f = os.path.join(tmp, f"u_{n}_{mode}_{r}.npy")
                 cp = subprocess.run([sys.executable, "-c", CHILD, str(n), str(iters), mode, f], cwd=ROOT,
@@ -128,15 +137,16 @@ def run(sizes, iters, repeats, out_dir):
         def med(mode):
             v = [x["total_seconds"] for x in rows if x["n"] == n and x["mode"] == mode and "error" not in x]
             return (statistics.median(v), (max(v) - min(v)) if len(v) > 1 else 0.0) if v else (None, None)
-        (tc, sc), (tg, sg), (ta, sa) = med("numpy"), med("cupy"), med("auto")
+        (tc, sc), (ta, sa) = med("numpy"), med("auto")
+        tg, sg = med("cupy") if "cupy" in modes else (None, None)  # without a GPU: oracle = the CPU run
         autos = [x for x in rows if x["n"] == n and x["mode"] == "auto" and "error" not in x]
-        if None in (tc, tg, ta) or not autos:
+        if None in (tc, ta) or not autos or ("cupy" in modes and tg is None):
             summary.append({"n": n, "error": "a configuration failed"})
             continue
-        oracle_dev = "cpu" if tc <= tg else "gpu"
-        oracle = min(tc, tg)
+        oracle_dev = "cpu" if tg is None or tc <= tg else "gpu"
+        oracle = tc if tg is None else min(tc, tg)
         chosen = sorted({a["device"] for a in autos})
-        a1 = (max(tc, tg) / oracle <= 1.15) or chosen == [oracle_dev]
+        a1 = (tg is not None and max(tc, tg) / oracle <= 1.15) or chosen == [oracle_dev]
         a2 = ta <= 1.15 * oracle
         a3, du_auto, du_noise = True, 0.0, 0.0
         for a in autos:
@@ -150,7 +160,10 @@ def run(sizes, iters, repeats, out_dir):
         cells = autos[0]["cells"]
         summary.append({"n": n, "cells": cells, "cpu_s": tc, "cpu_spread_s": sc, "gpu_s": tg, "gpu_spread_s": sg,
                         "auto_s": ta, "auto_spread_s": sa, "oracle_device": oracle_dev, "planner_device": chosen,
-                        "auto_over_oracle": ta / oracle, "old_auto_over_oracle": tg / oracle,
+                        "auto_over_oracle": ta / oracle, "old_auto_over_oracle": tg / oracle if tg else None,
+                        "auto_planning_s": statistics.median(a["planning_seconds"] for a in autos),
+                        "cpu_planning_s": statistics.median(x["planning_seconds"] for x in rows
+                                                            if x["n"] == n and x["mode"] == "numpy" and "error" not in x),
                         "A1": a1, "A2": a2, "A3": a3, "max_du_planner_vs_fixed": du_auto,
                         "max_du_fixed_repeats": du_noise, "reason": autos[0]["reason"],
                         "peak_rss_bytes": max((a["peak_rss_bytes"] or 0) for a in autos),
@@ -158,17 +171,18 @@ def run(sizes, iters, repeats, out_dir):
                                               if x["n"] == n and "error" not in x)})
     for x in rows:
         x.pop("field_file", None)
-    data = {"experiment": "planner_unstructured", "date": dt.datetime.now().isoformat(timespec="seconds"),
+    data = {"experiment": name, "modes": list(modes), "date": dt.datetime.now().isoformat(timespec="seconds"),
             "case": "lid-driven cavity Re=100, uniform quads, SIMPLEC, FP64, second-order",
             "iterations": iters, "repeats": repeats, "stopping": f"fixed {iters} iterations (tol = 0)",
             "environment": _environment(),
             "reproduce": f"python benchmarks/planner_unstructured.py --sizes {','.join(map(str, sizes))} "
-                         f"--iters {iters} --repeats {repeats}",
+                         f"--iters {iters} --repeats {repeats}"
+                         + ("" if tuple(modes) == ("numpy", "cupy", "auto") else f" --modes {','.join(modes)} --name {name}"),
             "summary": summary, "runs": rows}
     data["passed"] = all(s.get("A1") and s.get("A2") and s.get("A3") for s in summary)
-    with open(os.path.join(out_dir, "planner_unstructured.json"), "w", encoding="utf-8") as fh:
+    with open(os.path.join(out_dir, f"{name}.json"), "w", encoding="utf-8") as fh:
         json.dump(data, fh, indent=1, default=str)
-    with open(os.path.join(out_dir, "planner_unstructured.md"), "w", encoding="utf-8") as fh:
+    with open(os.path.join(out_dir, f"{name}.md"), "w", encoding="utf-8") as fh:
         fh.write(render_markdown(data))
     for f in os.listdir(tmp):
         os.remove(os.path.join(tmp, f))
@@ -184,20 +198,22 @@ def render_markdown(d) -> str:
              f"FlowTrace {env['flowtrace']} @ {env['git_commit'][:10]}{' (uncommitted changes)' if env['git_dirty'] else ''}, "
              f"Python {env['python']}, {env['os']}.",
              f"Case: {d['case']}; {d['stopping']}; median of {d['repeats']} fresh processes (spread = max - min).",
-             f"Calibration: GPU floor {cal.get('gpu_floor_ms', float('nan')):.1f} ms/iteration, "
-             f"CPU {cal['cpu_us_per_cell']:.2f} us/cell/iteration.", "",
+             (f"Calibration: GPU floor {cal['gpu_floor_ms']:.1f} ms/iteration, " if cal.get("gpu_floor_ms") is not None
+              else "Calibration: no GPU, ") + f"CPU {cal['cpu_us_per_cell']:.2f} us/cell/iteration.", "",
              "| cells | CPU (s) | GPU = old auto (s) | planner (s) | planner chose | oracle | planner / oracle "
-             "| old auto / oracle | A1 | A2 | A3 |",
-             "|---:|---:|---:|---:|---|---|---:|---:|---|---|---|"]
+             "| old auto / oracle | planning, planner / fixed CPU (s) | A1 | A2 | A3 |",
+             "|---:|---:|---:|---:|---|---|---:|---:|---:|---|---|---|"]
     ok = lambda b: "pass" if b else "**FAIL**"  # noqa: E731
     for s in d["summary"]:
         if "error" in s:
-            lines.append(f"| n={s['n']} | failed | | | | | | | | | |")
+            lines.append(f"| n={s['n']} | failed | | | | | | | | | | |")
             continue
-        lines.append(f"| {s['cells']:,} | {s['cpu_s']:.2f} ± {s['cpu_spread_s']:.2f} | "
-                     f"{s['gpu_s']:.2f} ± {s['gpu_spread_s']:.2f} | "
+        gpu_col = f"{s['gpu_s']:.2f} ± {s['gpu_spread_s']:.2f}" if s.get("gpu_s") is not None else "not run"
+        old = f"{s['old_auto_over_oracle']:.2f}" if s.get("old_auto_over_oracle") is not None else "-"
+        planning = (f"{s['auto_planning_s']:.2f} / {s['cpu_planning_s']:.2f}" if "auto_planning_s" in s else "-")
+        lines.append(f"| {s['cells']:,} | {s['cpu_s']:.2f} ± {s['cpu_spread_s']:.2f} | {gpu_col} | "
                      f"{s['auto_s']:.2f} ± {s['auto_spread_s']:.2f} | {'/'.join(s['planner_device']).upper()} | "
-                     f"{s['oracle_device'].upper()} | {s['auto_over_oracle']:.2f} | {s['old_auto_over_oracle']:.2f} | "
+                     f"{s['oracle_device'].upper()} | {s['auto_over_oracle']:.2f} | {old} | {planning} | "
                      f"{ok(s['A1'])} | {ok(s['A2'])} | {ok(s['A3'])} |")
     lines += ["", f"Overall: {'all acceptance criteria met' if d['passed'] else 'at least one criterion FAILED'}.",
               "", f"Reproduce: `{d['reproduce']}`", ""]
@@ -210,6 +226,8 @@ if __name__ == "__main__":
     ap.add_argument("--iters", type=int, default=100)
     ap.add_argument("--repeats", type=int, default=3)
     ap.add_argument("--out", default=os.path.join(ROOT, "benchmarks", "results"))
+    ap.add_argument("--modes", default="numpy,cupy,auto", help="numpy,auto on a machine without a GPU")
+    ap.add_argument("--name", default="planner_unstructured", help="stem of the result files")
     a = ap.parse_args()
-    res = run([int(x) for x in a.sizes.split(",")], a.iters, a.repeats, a.out)
+    res = run([int(x) for x in a.sizes.split(",")], a.iters, a.repeats, a.out, tuple(a.modes.split(",")), a.name)
     print(render_markdown(res))

@@ -22,11 +22,12 @@ import gzip
 import io
 import os
 import re
+import zlib
 from typing import Dict, List, Tuple
 
 import numpy as np
 
-from .unstructured import BC_CODES, BC_NAMES, UnstructuredMesh, Zone, sort_faces_by_zone
+from .unstructured import BC_CODES, BC_NAMES, UnstructuredMesh, Zone, reverse_face_nodes, sort_faces_by_zone
 
 _WS = b" \t\r\n"
 
@@ -170,7 +171,20 @@ def _faces_from_ints(vals: np.ndarray, nfaces: int, face_type: int):
 
 
 def read_fluent_mesh(path_or_bytes, name: str = None) -> UnstructuredMesh:
-    """Read a Fluent .msh/.cas (ASCII or binary, optionally .gz) into an UnstructuredMesh."""
+    """Read a Fluent .msh/.cas (ASCII or binary, optionally .gz) into an UnstructuredMesh.
+
+    A file that cannot be parsed raises :class:`FluentMeshError` (a ``ValueError``) naming the
+    file and the cause; a missing file raises ``FileNotFoundError``."""
+    try:
+        return _read_fluent_mesh(path_or_bytes, name)
+    except FluentMeshError:
+        raise
+    except (ValueError, IndexError, KeyError, EOFError, gzip.BadGzipFile, zlib.error) as exc:
+        where = "" if isinstance(path_or_bytes, (bytes, bytearray)) else f"{path_or_bytes}: "
+        raise FluentMeshError(f"{where}not a readable Fluent mesh ({type(exc).__name__}: {exc})") from exc
+
+
+def _read_fluent_mesh(path_or_bytes, name: str = None) -> UnstructuredMesh:
     if isinstance(path_or_bytes, (bytes, bytearray)):
         buf = bytes(path_or_bytes)
         if buf[:2] == b"\x1f\x8b":
@@ -361,6 +375,8 @@ def read_fluent_mesh(path_or_bytes, name: str = None) -> UnstructuredMesh:
             s, e = ptr[f], ptr[f + 1]
             fnodes[s:e] = fnodes[s:e][::-1].copy()
         c0[swap], c1[swap] = c1[swap], 0
+    if dim == 3:  # Fluent's 3-D faces have their right-hand normal toward c0; FlowTrace's out of it
+        fnodes = reverse_face_nodes(ptr, fnodes)
     owner = c0 - 1
     neighbour = np.where(c1 > 0, c1 - 1, -1)
     n_cells = max(total_cells, int(owner.max()) + 1, int(neighbour.max()) + 1)
@@ -431,6 +447,8 @@ def write_fluent_mesh(mesh: UnstructuredMesh, path: str, binary: bool = False, t
     """Write an UnstructuredMesh as a Fluent .msh file (ASCII, or binary double precision)."""
     mesh = sort_faces_by_zone(mesh)
     dim = mesh.dim
+    # Fluent's 3-D convention: right-hand normal toward c0 (the reverse of FlowTrace's)
+    face_nodes = reverse_face_nodes(mesh.face_ptr, mesh.face_nodes) if dim == 3 else mesh.face_nodes
     out = io.BytesIO()
     w = out.write
 
@@ -483,7 +501,7 @@ def write_fluent_mesh(mesh: UnstructuredMesh, path: str, binary: bool = False, t
             w(f"(13 {header}(\n".encode())
         rows = []
         for f, kk, a, b in zip(fids, cnt, c0, c1):
-            nodes = mesh.face_nodes[mesh.face_ptr[f]:mesh.face_ptr[f + 1]] + 1
+            nodes = face_nodes[mesh.face_ptr[f]:mesh.face_ptr[f + 1]] + 1
             rec = ([int(kk)] if k == 0 else []) + nodes.tolist() + [int(a), int(b)]
             rows.append(rec)
         if binary:

@@ -38,3 +38,25 @@ def test_planner_measures_and_explains():
     assert solver.step_count >= 4
     plan, _ = plan_structured(cylinder_wake(n_per_d=4), autotune=False)
     assert "MG-PCG" in plan.pressure
+
+
+def test_unstructured_memory_estimate_is_an_upper_bound():
+    """The pre-run estimate must not be below what a run really allocates (CPU, tracemalloc)."""
+    import tracemalloc
+
+    from flowtrace.hardware.memory import estimate_unstructured
+    from flowtrace.mesh.unstructured import cartesian_mesh_2d
+    from flowtrace.unstructured.case import BoundarySpec, UnstructuredCase
+    from flowtrace.unstructured.simple import SimpleSolver
+
+    mesh = cartesian_mesh_2d(96, 96)
+    case = UnstructuredCase(boundaries={"top": BoundarySpec("wall", velocity=[1.0, 0.0])}, max_iter=100, tol=0,
+                            backend="numpy")
+    tracemalloc.start()
+    s = SimpleSolver(mesh, case)
+    for _ in range(12):
+        s.step()
+    _, peak = tracemalloc.get_traced_memory()
+    tracemalloc.stop()
+    est = estimate_unstructured(mesh.n_cells, mesh.n_faces, mesh.dim, 8, False, "cpu", 0)
+    assert est.required >= peak

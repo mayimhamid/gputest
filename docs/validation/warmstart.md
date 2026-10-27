@@ -1,6 +1,7 @@
 # Fluent warm-start study
 
-**Question:** how many iterations does a FlowTrace initial field save a pressure-based solver?
+**Question:** how many iterations does a FlowTrace initial field save a pressure-based solver,
+and does that save time once the pre-solve is paid for?
 
 ## Method
 
@@ -17,7 +18,10 @@ Re = 200, steady cylinder Re = 40, heated cavity Ra = 10⁵):
    runs are counted until the velocity (and temperature) field is within 10⁻⁴ (relative, max
    norm) of that answer.** This measures what matters, the solution, and is immune to
    residual-normalisation artefacts. The usual "iterations until the scaled residuals reach
-   10⁻⁵" are listed as well.
+   10⁻⁵" are listed as well. **Both runs are also timed on equal terms:** solver steps only,
+   until the same field tolerance. The warm path is charged with the FlowTrace pre-solve and
+   the interpolation. The ratio of the two is the wall-time saving, reported for information,
+   with no acceptance criterion.
 3. **Fluent measurement (needs a licence).** The same cold/warm pair in Ansys Fluent through
    PyFluent, or by running `cold.jou`/`warm.jou` and `flowtrace parse-transcript cold.trn warm.trn`.
 
@@ -50,8 +54,31 @@ The pre-solve resolves the cylinder with 12 staircase cells per diameter, the ta
 
 The interpolated field is the right answer on the wrong mesh. On the target mesh the wake has
 to grow by about a quarter, and SIMPLEC does that more slowly than it develops the wake from
-rest. A warm start helps when the pre-solve and the target mesh resolve the geometry alike. On
-this mesh pair they do not.
+rest.
+
+**A pre-registered test of that explanation.** If the mesh mismatch is the cause, a target
+mesh that resolves the cylinder like the pre-solve should restore the saving. The prediction
+was written down before the runs: fewer warm than cold iterations on a matched target, and no
+saving, or a much smaller one, on a mismatched target. Same case, same field tolerance, and
+FlowTrace's SIMPLEC as the target solver:
+
+| Pre-solve | Target mesh | Target cells | Cold | Warm | Saved |
+|---|---|---:|---:|---:|---:|
+| 8 cells/D | same resolution (scale 1.0) | 8,144 | 300 | 190 | ×1.58 |
+| 8 cells/D | coarser (scale 0.75, 6 cells/D) | 4,580 | 306 | 260 | ×1.18 |
+| 12 cells/D | same resolution (scale 1.0) | 18,324 | 558 | 274 | ×2.04 |
+| 12 cells/D | coarser (scale 0.75, 9 cells/D): the study's case | 10,308 | 700 | 1,085 | ×0.65 |
+
+The prediction held at both resolutions. On a target mesh that resolves the cylinder like the
+pre-solve, the warm start keeps its benefit: ×1.58 at 8 cells/D and ×2.04 at 12 cells/D. A
+coarser target lowers the saving (×1.18 at 8 → 6 cells/D) or turns it into a loss (×0.65 at
+12 → 9 cells/D). The failing check is therefore a property of this mesh pair, not of the solver
+or of the interpolation. It stays in the benchmark as a failing check, and its criterion is not
+changed. The 12 → 9 cells/D row is the committed full-tier run; the other rows come from
+`flowtrace.fluent.warmstart_study.run_proxy_case` with the target scale changed.
+
+These runs shared the machine with other jobs, so only their iteration counts are reported;
+their timings are not.
 
 ## Running the Fluent part
 

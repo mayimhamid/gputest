@@ -3,14 +3,35 @@
 M_required = M_mesh + M_fields + M_solver + M_preconditioner + M_temporary,
 compared with what the target device actually has free, with a safety margin
 for allocator fragmentation and library workspaces (cuFFT/cuBLAS plans).
+
+The estimates are upper bounds on the CPU (benchmarks/memory_estimate.py), so a
+case that does not fit is refused before anything large is allocated: the planner
+skips a device it does not fit on, and raises MemoryError when it fits on none.
+``FLOWTRACE_MEMORY_CHECK=off`` lets such a run start anyway (at the user's risk).
 """
 
 from __future__ import annotations
 
+import os
 from dataclasses import asdict, dataclass, field
 from typing import Dict, List
 
 SAFETY = 1.25  # allocator fragmentation, FFT/BLAS workspaces, CUDA context
+OVERRIDE = "FLOWTRACE_MEMORY_CHECK"  # =off: never refuse a case on its memory estimate
+
+
+def _check_disabled() -> bool:
+    return os.environ.get(OVERRIDE, "").strip().lower() in ("off", "0", "no", "false")
+
+
+def _verdict(req: int, available: int, device: str):
+    """(fits, advice) for an estimate of ``req`` bytes against ``available`` free bytes."""
+    if available <= 0 or req <= available:
+        return True, []
+    need = f"Needs up to ~{_fmt(req)} but only {_fmt(available)} free on {device}."
+    if _check_disabled():
+        return True, [need, f"Memory check disabled ({OVERRIDE}=off): running anyway."]
+    return False, [need, f"To try anyway, set {OVERRIDE}=off."]
 
 
 @dataclass
@@ -57,16 +78,14 @@ def estimate_structured(nx: int, ny: int, energy: bool, itemsize: int, pressure:
         bd["diffusion_solvers"] = (3 if energy else 2) * ((nx * nx + ny * ny) * 2 * itemsize + 2 * n * itemsize)
     raw = sum(bd.values())
     req = int(raw * SAFETY)
-    fits = req <= available if available > 0 else True
-    advice = []
+    fits, advice = _verdict(req, available, device)
     if not fits:
-        advice.append(f"Needs ~{_fmt(req)} but only {_fmt(available)} free on {device}.")
+        hints = ["Run on the CPU backend (system RAM) or reduce the grid." if device == "gpu"
+                 else "Reduce the grid resolution."]
         if itemsize == 8:
-            advice.append("Switch precision to fp32 (halves field memory).")
-        if device == "gpu":
-            advice.append("Run on the CPU backend (system RAM) or reduce the grid.")
-        else:
-            advice.append("Reduce the grid resolution.")
+            hints.append("precision='fp32' halves field memory, but check that FP32 can meet the steady "
+                         "tolerance (docs/user-guide/gpu.md, Precision).")
+        advice[1:1] = hints
     return MemoryEstimate(device=device, breakdown=bd, required=req, available=int(available), fits=fits,
                           utilisation=(req / available) if available else 0.0, advice=advice)
 
@@ -83,10 +102,22 @@ def estimate_unstructured(n_cells: int, n_faces: int, dim: int, itemsize: int, e
         "preconditioner": (int(1.6 * nnz * (itemsize + 4))) if amg else n_cells * itemsize,
         "krylov_vectors": 8 * n_cells * itemsize,
     }
+    # The terms above leave out geometry and FV-mesh intermediates, the incidence and pattern
+    # matrices (and their native-kernel copies), the per-iteration momentum, relaxed and
+    # pressure matrices and the gradient lists. Measured peaks (CPU, 4k-65k cells, 2-D and 3-D,
+    # laminar, energy and SST) were 1.9-3.3x the estimate without this term; with it they are
+    # 0.57-0.76x of it as traced allocations and 0.48-0.82x as resident-set growth, which
+    # varies by a few per cent between runs (benchmarks/memory_estimate.py). The GPU path
+    # stores the same arrays; its CuPy pool overhead has not been measured.
+    modelled = sum(bd.values())
+    bd["measured_overhead"] = int(1.3 * modelled + 8e6)
     raw = sum(bd.values())
     req = int(raw * SAFETY)
-    fits = req <= available if available > 0 else True
-    advice = [] if fits else [f"Needs ~{_fmt(req)} but only {_fmt(available)} free on {device}."]
+    fits, advice = _verdict(req, available, device)
+    if not fits:  # an upper bound: say so, and what would help
+        advice[1:1] = ["This is an upper bound (measured CPU peaks were at most 0.82 of it).",
+                       "Run on the CPU (system RAM) or use a coarser mesh." if device == "gpu"
+                       else "Use a coarser mesh, close other programs, or use a machine with more memory."]
     return MemoryEstimate(device=device, breakdown=bd, required=req, available=int(available), fits=fits,
                           utilisation=(req / available) if available else 0.0, advice=advice)
 

@@ -40,16 +40,40 @@ the case file has none.
 
 | File | Read | Write | Status |
 |---|---|---|---|
-| `.msh` / legacy `.cas` (ASCII, binary, gzip) | ✓ | ✓ (`.msh`) | round-trip tested; sample meshes in `examples/` |
+| `.msh` / legacy `.cas` (ASCII, binary, gzip) | ✓ | ✓ (`.msh`) | round-trip tested; 3-D face orientation tested on a hexahedron written by hand in Fluent's convention; sample meshes in `examples/` |
 | Periodic pairs (section 18) | ✓ | ✓ | round-trip tested |
-| `.cas.h5` / `.msh.h5` (CFF mesh) | ✓ | ✓ | layout of the public VTK reader; **not yet checked against Fluent-written files** |
-| `.dat.h5` (CFF cell data, `SV_*` names) | ✓ | ✓ | as above |
+| `.cas.h5` / `.msh.h5` (CFF mesh) | ✓ | ✓ | **read checked against Fluent-written files** (below); written files reproduce Fluent's node order and c0/c1 face by face; Fluent reading a FlowTrace-written file is not yet checked |
+| `.dat.h5` (CFF cell data, `SV_*` names) | ✓ | ✓ | read checked against a Fluent-written solution (below); written files not yet read by Fluent |
 | `.ip` interpolation (v3 ASCII) | ✓ | ✓ | the verified warm-start route |
 | `.prof` point profile | — | ✓ | boundary profiles |
 | Journal (`.jou`), PyFluent (`.py`) | — | ✓ | TUI/Settings-API names can differ between releases |
 
 `flowtrace h5-inspect` prints the full HDF5 tree. If FlowTrace cannot read a Fluent-written
 `.cas.h5`, please open an issue and attach that output; no geometry is needed.
+
+### Checked against files written by Fluent
+
+`benchmarks/fluent_files_check.py` downloads the PyFluent *mixing elbow* example, published
+by Ansys in `ansys/example-data` under the MIT licence (about 9 MB, SHA-256 verified). That is
+a 3-D polyhedral mesh as `.msh.h5` in inches, its case as `.cas.h5` in metres, and a converged
+solution as `.dat.h5`. The script then tests seven properties, each with its criterion fixed
+in `flowtrace/validation/fluent_files.py`. The same check runs as the opt-in test
+`tests/test_fluent_files.py`, and in CI.
+
+--8<-- "benchmarks/results/fluent_files_check.md"
+
+The check found two bugs, both fixed in this release:
+
+* **3-D face orientation.** Fluent stores a 3-D face with the right-hand normal of its node
+  order pointing *toward* c0. FlowTrace reversed every 3-D face on reading and on writing. Its
+  geometry repair hid the reversal in its own solutions, but files written for Fluent had every
+  face reversed. 2-D files were not affected.
+* **Skewness on polyhedra.** Equiangle skewness is defined for standard element shapes only. On
+  the mixing elbow's polyhedra it gave false critical values, and `flowtrace quality` refused
+  Fluent's own mesh. Polyhedral cells are now judged by orthogonal quality, as in Fluent.
+
+3-D `.msh`/`.cas.h5` files written by FlowTrace 0.3.0 or earlier still read. The repair flips
+their faces, and the quality report notes it. Re-export them before giving them to Fluent.
 
 ## Measuring the benefit
 

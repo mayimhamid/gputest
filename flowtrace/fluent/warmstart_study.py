@@ -71,17 +71,29 @@ class ProxyResult:
     warm_iterations: int  # same criterion, starting from the interpolated .ip field
     cold_iterations_tol: Optional[int]  # until the scaled residuals reach the tolerance (what a user sees)
     warm_iterations_normalised: Optional[int]  # same, warm run (continuity normalised by its first iterations)
-    cold_seconds: float
-    warm_seconds: float
+    cold_seconds: float  # whole cold loop, to the tight tolerance, monitoring included
+    warm_seconds: float  # whole warm loop, monitoring included
     cold_converged: bool
     warm_converged: bool
     max_velocity_difference: float  # |u_warm - u_ref|_inf / |u_ref|_inf at the end of the warm run
     stride: int = 1  # field snapshots of the cold run every `stride` iterations (count resolution)
     package: Dict[str, str] = field(default_factory=dict)
+    # wall time on equal terms: solver steps only (field monitoring excluded on both sides), until the
+    # field is within FIELD_TOL of the converged one; the interpolation of the .ip file separately
+    cold_solver_seconds: float = float("nan")
+    warm_solver_seconds: float = float("nan")
+    interpolation_seconds: float = float("nan")
 
     @property
     def speedup(self) -> float:
         return self.cold_iterations / max(self.warm_iterations, 1)
+
+    @property
+    def wallclock_ratio(self) -> float:
+        """Cold solver time / (pre-solve + interpolation + warm solver time) to the same field;
+        > 1 only if the whole warm-start path is faster in elapsed time."""
+        total = self.flowtrace_seconds + self.interpolation_seconds + self.warm_solver_seconds
+        return self.cold_solver_seconds / total if total > 0 else float("nan")
 
 
 FIELD_TOL = 1e-4  # relative max-norm distance to the converged field that counts as "converged"
@@ -166,24 +178,33 @@ def run_proxy_case(name: str, out_dir: str, backend: str = "auto", tol: float = 
     stride = max(1, mesh.n_cells // 2000)
     cold = SimpleSolver(mesh, _ucase(case, max_iter, min(tol, 1e-7)), backend=be)
     snaps, n_cold_tol = [], None
+    cold_solver = 0.0  # time inside cold.step() only
     t1 = time.perf_counter()
     while not cold.finished:
+        ts = time.perf_counter()
         cold.step()
+        cold_solver += time.perf_counter() - ts
         if n_cold_tol is None and cold.iteration > 5 and max(cold.residuals()["scaled"].values()) < tol:
             n_cold_tol = cold.iteration
         if cold.iteration % stride == 0:
-            snaps.append((cold.iteration, state(cold)))
+            snaps.append((cold.iteration, cold_solver, state(cold)))
     cold_s = time.perf_counter() - t1
     ref = state(cold)
-    n_cold = next((it for it, s in snaps if distance(s, ref) <= FIELD_TOL), cold.iteration)
+    n_cold, cold_field_s = next(((it, sec) for it, sec, s in snaps if distance(s, ref) <= FIELD_TOL),
+                                (cold.iteration, cold_solver))
     del snaps
     # warm: interpolate the .ip file onto the target cells, iterate until within FIELD_TOL
     warm = SimpleSolver(mesh, _ucase(case, max_iter, min(tol, 1e-7)), backend=be)
+    ti = time.perf_counter()
     warm.initialize(interpolate_ip_file(pkg["ip"], warm.cell_centres()))
+    interp_s = time.perf_counter() - ti
     t2 = time.perf_counter()
+    warm_solver = 0.0
     n_norm, d = None, float("inf")
     while warm.iteration < max_iter:
+        ts = time.perf_counter()
         warm.step()
+        warm_solver += time.perf_counter() - ts
         if n_norm is None and warm.iteration > 5 and max(warm.residuals()["scaled"].values()) < tol:
             n_norm = warm.iteration
         d = distance(state(warm), ref)
@@ -192,7 +213,9 @@ def run_proxy_case(name: str, out_dir: str, backend: str = "auto", tol: float = 
     warm_s = time.perf_counter() - t2
     res = ProxyResult(name, spec["title"], case.nx * case.ny, mesh.n_cells, ft_seconds, n_cold, warm.iteration,
                       n_cold_tol, n_norm, cold_s, warm_s, cold.converged, d <= FIELD_TOL, d, stride,
-                      {k: os.path.relpath(v, out_dir) for k, v in pkg.items()})
+                      {k: os.path.relpath(v, out_dir) for k, v in pkg.items()},
+                      cold_solver_seconds=cold_field_s, warm_solver_seconds=warm_solver,
+                      interpolation_seconds=interp_s)
     write_fluent_case_files(out_dir, case, mesh_file=os.path.basename(pkg["msh"]),
                             ip_file=os.path.basename(pkg["ip"]), tol=tol)
     return res
@@ -394,7 +417,7 @@ def run_study(out_dir: str = "benchmarks/fluent_warmstart", cases: Optional[List
                   f"(x{r.speedup:.1f}); FlowTrace {r.flowtrace_seconds:.1f} s", flush=True)
     fl = run_fluent_study(dirs) if fluent else [FluentResult(c, "not-run", message="skipped (--no-fluent)")
                                                  for c in cases]
-    data = {"proxy": [dict(asdict(r), speedup=r.speedup) for r in proxy],
+    data = {"proxy": [dict(asdict(r), speedup=r.speedup, wallclock_ratio=r.wallclock_ratio) for r in proxy],
             "fluent": [dict(asdict(r), speedup=r.speedup) for r in fl],
             "tolerance": tol}
     from ..validation.benchmarks import _clean, machine_info
@@ -417,6 +440,12 @@ def render_markdown(data: dict) -> str:
          "count there is distorted by the continuity normalisation (see the text).", "",
          "| Case | Target cells | Cold | Warm | Saved | FlowTrace pre-solve | Cold to tol. | Warm to tol. |",
          "|---|---|---|---|---|---|---|---|"]
+    timing = ["", "Wall time on equal terms (solver steps only, until the same field tolerance; "
+              "the warm path also pays the FlowTrace pre-solve and the interpolation). A ratio above 1 "
+              "would mean the whole warm-start path is faster. The proxy's target solver is cheap, so this "
+              "says nothing about a large Fluent case; it keeps iteration savings and elapsed-time savings apart.", "",
+              "| Case | Cold solver time | Pre-solve + interpolation + warm solver | Wall-time ratio |",
+              "|---|---|---|---|"]
     for r in data["proxy"]:
         def n(v):
             return f"{v:,}" if v else "-"
@@ -424,6 +453,13 @@ def render_markdown(data: dict) -> str:
         L.append(f"| {r['title']} | {r['cells_target']:,} | {r['cold_iterations']:,} | {warm} | "
                  f"x{r['speedup']:.1f} | {r['flowtrace_seconds']:.1f} s | {n(r.get('cold_iterations_tol'))} | "
                  f"{n(r.get('warm_iterations_normalised'))} |")
+        if r.get("cold_solver_seconds") is not None and r.get("wallclock_ratio") is not None:
+            path = r["flowtrace_seconds"] + r["interpolation_seconds"] + r["warm_solver_seconds"]
+            timing.append(f"| {r['title']} | {r['cold_solver_seconds']:.2f} s | {path:.2f} s "
+                          f"({r['flowtrace_seconds']:.2f} + {r['interpolation_seconds']:.2f} + "
+                          f"{r['warm_solver_seconds']:.2f}) | x{r['wallclock_ratio']:.2f} |")
+    if len(timing) > 5:  # at least one measured row below the header
+        L += timing
     L += ["", "### Ansys Fluent: cold start vs `.ip` warm start", ""]
     if all(r["status"] != "measured" for r in data["fluent"]):
         reason = data["fluent"][0]["message"] if data["fluent"] else ""

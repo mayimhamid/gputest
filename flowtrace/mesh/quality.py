@@ -8,7 +8,13 @@
 * **Equiangle skewness** (0 best ... 1 degenerate):
   ``max((th_max - th_e)/(180 - th_e), (th_e - th_min)/th_e)`` over the
   interior angles of the cell (2-D) or of its faces (3-D), with ``th_e`` the
-  angle of the equiangular polygon (60 deg triangle, 90 deg quad).
+  angle of the equiangular polygon (60 deg triangle, 90 deg quad). It is
+  defined for the standard element types only: triangles and quads in 2-D;
+  tetrahedra, pyramids, prisms and hexahedra (4-6 triangular or quad faces) in
+  3-D. Polygonal and polyhedral cells, as Fluent Meshing's poly meshes, are
+  judged by orthogonal quality, as Fluent does; their faces may carry collinear
+  hanging nodes (180 deg "corners") that the equiangle formula would score as
+  degenerate. Their skewness is reported as not applicable.
 * **Aspect ratio**: largest over smallest normal distance from the cell
   centroid to its faces (1 for squares, equilateral triangles, cubes).
 * **Non-orthogonality**: angle between ``A_f`` and the centroid-to-centroid
@@ -50,6 +56,7 @@ class QualityReport:
     histograms: Dict[str, dict] = field(default_factory=dict)
     warnings: List[str] = field(default_factory=list)
     locations: Dict[str, list] = field(default_factory=dict)
+    skewness_not_applicable_cells: int = 0  # polygonal / polyhedral cells (see the module docstring)
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -65,8 +72,11 @@ class QualityReport:
              f"  Minimum Orthogonal Quality = {self.min_orthogonal_quality:.5e}  cell {self.min_orthogonal_quality_cell}"
              f" at {_fmt_loc(loc.get('orthogonal_quality'))}",
              "  (Fluent Meshing reports the inverse: 1 - orthogonal quality)", "",
-             f"  Maximum Equiangle Skewness = {self.max_skewness:.5e}  cell {self.max_skewness_cell}"
-             f" at {_fmt_loc(loc.get('skewness'))}",
+             (f"  Maximum Equiangle Skewness = {self.max_skewness:.5e}  cell {self.max_skewness_cell}"
+              f" at {_fmt_loc(loc.get('skewness'))}" if self.max_skewness == self.max_skewness
+              else "  Maximum Equiangle Skewness = n/a (no standard-element cells)")
+             + (f"  [not applicable to {self.skewness_not_applicable_cells} polygonal/polyhedral cells]"
+                if self.skewness_not_applicable_cells else ""),
              f"  Maximum Aspect Ratio = {self.max_aspect_ratio:.5e}  cell {self.max_aspect_ratio_cell}"
              f" at {_fmt_loc(loc.get('aspect_ratio'))}",
              f"  Non-orthogonality: max {self.max_non_orthogonality_deg:.2f} deg, mean {self.mean_non_orthogonality_deg:.2f} deg",
@@ -144,15 +154,24 @@ def mesh_quality(mesh: UnstructuredMesh, bins: int = 10) -> QualityReport:
     np.maximum.at(dmax, ni, hn)
     ar = dmax / np.maximum(dmin, 1e-300)
 
-    # skewness
+    # skewness, for the standard element types only (see the module docstring)
     skew = np.zeros(nc)
+    faces_per_cell = np.bincount(own, minlength=nc) + np.bincount(ni, minlength=nc)
     if dim == 2:
         ptr, loops = mesh.cell_polygons_2d()
         skew = _skew_polygons(mesh.nodes, ptr, loops)
+        standard = faces_per_cell <= 4  # triangles and quads (edges = vertices)
     else:
+        nodes_per_face = np.diff(mesh.face_ptr)
         fskew = _skew_polygons(mesh.nodes, mesh.face_ptr, mesh.face_nodes)
         np.maximum.at(skew, own, fskew)
         np.maximum.at(skew, ni, fskew[inter])
+        most_nodes = np.zeros(nc, dtype=np.int64)
+        np.maximum.at(most_nodes, own, nodes_per_face)
+        np.maximum.at(most_nodes, ni, nodes_per_face[inter])
+        standard = (most_nodes <= 4) & (faces_per_cell >= 4) & (faces_per_cell <= 6)
+    skew_all = skew
+    skew = np.where(standard, skew, np.nan)
 
     # non-orthogonality and volume ratio
     nonorth = np.degrees(np.arccos(np.clip(c_own, -1, 1))) if ni.size else np.zeros(0)
@@ -163,11 +182,12 @@ def mesh_quality(mesh: UnstructuredMesh, bins: int = 10) -> QualityReport:
         np.maximum.at(vr, own[inter], r)
         np.maximum.at(vr, ni, r)
 
-    i_oq, i_sk, i_ar = int(np.argmin(oq)), int(np.argmax(skew)), int(np.argmax(ar))
+    i_oq, i_ar = int(np.argmin(oq)), int(np.argmax(ar))
+    i_sk = int(np.argmax(np.where(standard, skew_all, -1.0))) if standard.any() else 0
     rep = QualityReport(
         cells=nc, faces=mesh.n_faces, dim=dim,
         min_orthogonal_quality=float(oq[i_oq]), min_orthogonal_quality_cell=i_oq,
-        max_skewness=float(skew[i_sk]), max_skewness_cell=i_sk,
+        max_skewness=float(skew_all[i_sk]) if standard.any() else float("nan"), max_skewness_cell=i_sk,
         max_aspect_ratio=float(ar[i_ar]), max_aspect_ratio_cell=i_ar,
         max_non_orthogonality_deg=float(np.max(nonorth)) if nonorth.size else 0.0,
         mean_non_orthogonality_deg=float(nonorth.mean()) if nonorth.size else 0.0,
@@ -175,8 +195,9 @@ def mesh_quality(mesh: UnstructuredMesh, bins: int = 10) -> QualityReport:
         left_handed_faces_repaired=geo.flipped_faces,
         locations={"orthogonal_quality": xc[i_oq].tolist(), "skewness": xc[i_sk].tolist(),
                    "aspect_ratio": xc[i_ar].tolist()},
+        skewness_not_applicable_cells=int((~standard).sum()),
     )
-    for name, arr, rng in (("orthogonal_quality", oq, (0, 1)), ("skewness", skew, (0, 1)),
+    for name, arr, rng in (("orthogonal_quality", oq, (0, 1)), ("skewness", skew_all[standard], (0, 1)),
                            ("aspect_ratio", np.log10(np.maximum(ar, 1.0)), (0, max(1.0, float(np.log10(ar.max())) + 1e-9)))):
         h, edges = np.histogram(arr, bins=bins, range=rng)
         rep.histograms[name] = {"counts": h.tolist(), "edges": edges.tolist(),
@@ -197,4 +218,7 @@ def mesh_quality(mesh: UnstructuredMesh, bins: int = 10) -> QualityReport:
         w.append(f"WARNING: neighbouring cell volumes differ by up to x{rep.max_volume_ratio:.3g} (> 5)")
     if rep.left_handed_faces_repaired:
         w.append(f"NOTE: {rep.left_handed_faces_repaired} left-handed faces were re-oriented on import")
+    if rep.skewness_not_applicable_cells:
+        w.append(f"NOTE: equiangle skewness not evaluated for {rep.skewness_not_applicable_cells} polygonal/polyhedral "
+                 "cells; orthogonal quality applies to them")
     return rep

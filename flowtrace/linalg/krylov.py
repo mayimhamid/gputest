@@ -57,6 +57,8 @@ def pcg(A: Callable, b, xp, M: Optional[Callable] = None, x0=None, tol: float = 
         if project is not None:
             z = project(z)
         rz_new = _dot(xp, r, z)
+        if rz == 0.0:  # breakdown (r.z underflowed: seen only on a diverging system); report, don't raise
+            return x, KrylovInfo(k, rnorm / bnorm, False)
         beta = rz_new / rz
         rz = rz_new
         p = z + beta * p

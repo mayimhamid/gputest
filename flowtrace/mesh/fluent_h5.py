@@ -32,7 +32,8 @@ from typing import Dict, Optional, Tuple
 
 import numpy as np
 
-from .unstructured import BC_CODES, BC_NAMES, UnstructuredMesh, Zone, sort_faces_by_zone
+from .fluent_msh import FluentMeshError
+from .unstructured import BC_CODES, BC_NAMES, UnstructuredMesh, Zone, reverse_face_nodes, sort_faces_by_zone
 
 # Fluent field names (as in .ip/.prof) <-> CFF solver-variable names
 SV_NAMES = {
@@ -138,6 +139,8 @@ def write_case_h5(mesh: UnstructuredMesh, path: str, title: str = "FlowTrace") -
         # faces: one section per zone
         fzones = sorted(mesh.face_zones(), key=lambda z: z.first)
         counts = np.diff(mesh.face_ptr)
+        # Fluent's 3-D convention: right-hand normal toward c0 (the reverse of FlowTrace's)
+        face_nodes_out = reverse_face_nodes(mesh.face_ptr, mesh.face_nodes) if dim == 3 else mesh.face_nodes
         fz = m.create_group("faces/zoneTopology")
         fz.attrs["nZones"] = np.uint64(len(fzones))
         fid, fmin, fmax, ztype, ftype = [], [], [], [], []
@@ -156,7 +159,7 @@ def write_case_h5(mesh: UnstructuredMesh, path: str, title: str = "FlowTrace") -
             sec.attrs["minId"], sec.attrs["maxId"] = np.uint64(z.first + 1), np.uint64(z.last + 1)
             sec.create_dataset("nnodes", data=cnt.astype(np.int16))
             sl = slice(mesh.face_ptr[z.first], mesh.face_ptr[z.last + 1])
-            sec.create_dataset("nodes", data=(mesh.face_nodes[sl] + 1).astype(np.uint32))
+            sec.create_dataset("nodes", data=(face_nodes_out[sl] + 1).astype(np.uint32))
             c1 = np.where(mesh.neighbour[fids] >= 0, mesh.neighbour[fids] + 1, 0)
             for grp, arr in ((fc0, mesh.owner[fids] + 1), (fc1, c1)):
                 d = grp.create_dataset(str(k), data=arr.astype(np.uint32))
@@ -190,14 +193,30 @@ def write_case_h5(mesh: UnstructuredMesh, path: str, title: str = "FlowTrace") -
     return path
 
 
+def _malformed(path: str, what: str, exc: Exception) -> FluentMeshError:
+    return FluentMeshError(f"{path}: not a readable Fluent CFF {what} ({type(exc).__name__}: {exc})")
+
+
 def read_case_h5(path: str, name: Optional[str] = None) -> UnstructuredMesh:
-    """Read the mesh of a CFF ``.cas.h5``/``.msh.h5`` file."""
+    """Read the mesh of a CFF ``.cas.h5``/``.msh.h5`` file.
+
+    A file that is HDF5 but not a complete CFF mesh raises :class:`FluentMeshError` (a
+    ``ValueError``) naming the file and the cause; a missing or non-HDF5 file raises ``OSError``."""
+    try:
+        return _read_case_h5(path, name)
+    except FluentMeshError:
+        raise
+    except (KeyError, IndexError, ValueError, TypeError) as exc:
+        raise _malformed(path, "case/mesh file", exc) from exc
+
+
+def _read_case_h5(path: str, name: Optional[str] = None) -> UnstructuredMesh:
     import os
 
     h5py = _h5()
     with h5py.File(path, "r") as f:
         if "meshes/1" not in f:
-            raise ValueError(f"{path}: no /meshes/1 group (not a Fluent CFF case/mesh file)")
+            raise FluentMeshError(f"{path}: no /meshes/1 group (not a Fluent CFF case/mesh file)")
         m = f["meshes/1"]
         dim = _i(m.attrs["dimension"])
         nn = _i(m.attrs.get("nodeCount", 0))
@@ -256,13 +275,15 @@ def read_case_h5(path: str, name: Optional[str] = None) -> UnstructuredMesh:
                                  "translation": np.asarray(g.attrs["translation"], float),
                                  "faces_a": np.asarray(g["faces_a"][()]), "faces_b": np.asarray(g["faces_b"][()])})
     if not covered.all():
-        raise ValueError(f"{path}: face/node sections do not cover all {nf} faces")
+        raise FluentMeshError(f"{path}: face/node sections do not cover all {nf} faces")
     ptr = np.concatenate([[0], np.cumsum(counts)]).astype(np.int64)
     # boundary faces stored with c0 == 0: flip so that the owner exists
     swap = (c0 == 0) & (c1 != 0)
     for fidx in np.nonzero(swap)[0]:
         face_nodes[ptr[fidx]:ptr[fidx + 1]] = face_nodes[ptr[fidx]:ptr[fidx + 1]][::-1].copy()
     c0, c1 = np.where(swap, c1, c0), np.where(swap, 0, c1)
+    if dim == 3:  # Fluent's 3-D faces have their right-hand normal toward c0; FlowTrace's out of it
+        face_nodes = reverse_face_nodes(ptr, face_nodes)
     n_cells = int(max(c0.max(), c1.max(), max(c_max) if c_max else 0))
     face_zone = np.zeros(nf, np.int64)
     zones: Dict[int, Zone] = {}
@@ -309,7 +330,16 @@ def write_data_h5(path: str, mesh: UnstructuredMesh, fields: Dict[str, np.ndarra
 
 
 def read_data_h5(path: str, n_cells: Optional[int] = None) -> Dict[str, np.ndarray]:
-    """Cell fields of a CFF ``.dat.h5`` keyed by Fluent field name (unknown SV names kept)."""
+    """Cell fields of a CFF ``.dat.h5`` keyed by Fluent field name (unknown SV names kept).
+
+    An HDF5 file without the CFF data layout raises :class:`FluentMeshError`."""
+    try:
+        return _read_data_h5(path, n_cells)
+    except (KeyError, IndexError, ValueError, TypeError) as exc:
+        raise _malformed(path, "data file", exc) from exc
+
+
+def _read_data_h5(path: str, n_cells: Optional[int] = None) -> Dict[str, np.ndarray]:
     h5py = _h5()
     out = {}
     with h5py.File(path, "r") as f:

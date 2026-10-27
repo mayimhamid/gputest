@@ -36,7 +36,7 @@ kernels are compiled by NVRTC, with no compiler required. Without a compiler, th
 runs on NumPy/SciPy and gives the same results. See [Native kernels](user-guide/native.md).
 
 ```bash
-pacman -S mingw-w64-ucrt-x86_64-gcc        # Windows, from an MSYS2 shell (then add ucrt64in to PATH)
+pacman -S mingw-w64-ucrt-x86_64-gcc        # Windows, from an MSYS2 shell (then add C:\msys64\ucrt64\bin to PATH)
 sudo apt install g++                       # Debian/Ubuntu
 ```
 
@@ -55,6 +55,6 @@ sudo apt install g++                       # Debian/Ubuntu
 ```bash
 flowtrace --version
 flowtrace probe
-pytest -q                          # from a source checkout: ~140 tests
-flowtrace benchmark --tier quick   # the verification suite (~2 minutes)
+pytest -q                          # from a source checkout: about 230 tests (GPU tests skip without a GPU)
+flowtrace benchmark --tier quick   # the verification suite (a few minutes)
 ```

@@ -56,7 +56,17 @@ Launder & Spalding (1974): C_μ = 0.09, C₁ = 1.44, C₂ = 1.92, σk = 1, σε 
 Wall Functions*. With \(u^* = C_\mu^{1/4}k_P^{1/2}\) and \(y^* = \max(\rho u^* y_P/\mu,\ 11.225)\):
 the wall shear is \(\tau_w = \rho\kappa u^* U_P/\ln(Ey^*)\); the wall-cell production is
 \(G_k = \tau_w^2/(\kappa\rho u^* y_P)\); and the near-wall dissipation is fixed at
-\(\varepsilon_P = C_\mu^{3/4}k_P^{3/2}/(\kappa y_P)\).
+\(\varepsilon_P = C_\mu^{3/4}k_P^{3/2}/(\kappa y_P)\). The constants are Fluent's pair
+κ = 0.4187 and E = 9.793 (log-law intercept \(B = \ln E/\kappa = 5.45\)). Up to version 0.3.0 the
+wall function used κ = 0.41 with E = 9.793 (B = 5.57), which matches neither Fluent nor the
+classical log law; it under-predicted the flat-plate skin friction by a further 2 % and
+over-predicted the channel core velocity (realizable k-ε centreline U⁺ 7.2 % high against the DNS,
+now 5.5 %). The SST model keeps Menter's κ = 0.41.
+
+The result depends on where the first cell sits. Measured on the flat plate (realizable k-ε,
+Re_L = 5×10⁶, mean deviation from Schultz-Grunow over 10⁶ < Re_x < 10⁷): −7.3 % at y⁺ ≈ 30,
+−5.0 % at y⁺ ≈ 56, −2.1 % at y⁺ ≈ 105 and −3.2 % at y⁺ ≈ 195. Keep the first cell at
+y⁺ ≈ 50–200 with wall functions; at y⁺ ≈ 30 the log-law assumption is at its weakest.
 
 ## Boundary conditions
 

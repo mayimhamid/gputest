@@ -99,4 +99,5 @@ check_untyped_defs = false
 # typed core modules (the numerics use NumPy/CuPy duck typing, checked by the tests)
 files = ["flowtrace/validation/gci.py", "flowtrace/validation/report.py", "flowtrace/mesh/quality.py",
          "flowtrace/mesh/grading.py", "flowtrace/hardware/memory.py", "flowtrace/fluent/export.py",
-         "flowtrace/fluent/warmstart_study.py", "flowtrace/runtime/checkpoint.py"]
+         "flowtrace/fluent/warmstart_study.py", "flowtrace/runtime/checkpoint.py",
+         "flowtrace/unstructured/diagnostics.py"]

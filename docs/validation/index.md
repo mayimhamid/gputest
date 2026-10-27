@@ -25,16 +25,30 @@ criteria are not adjusted after the fact.
 | Turbulence | `channel_retau395_*`, `flat_plate_*`, `bfs_driver_seegmiller_sst` | MKM DNS (1999), White / Schultz-Grunow, Driver & Seegmiller (1985) |
 | Fluent workflow | `warmstart_proxy` | FlowTrace SIMPLEC cold vs `.ip` warm start ([details](warmstart.md)) |
 
+Outside the benchmark suite, with their own scripts and committed results:
+
+| Check | Script | Result |
+|---|---|---|
+| Readers and writers against files written by Fluent | `benchmarks/fluent_files_check.py` | [7 of 7 properties](../user-guide/fluent.md#checked-against-files-written-by-fluent) |
+| FP32 against FP64 (accuracy and convergence) | `benchmarks/precision_fp32.py` | [FP32 reaches the tolerance in 1 of 6 cases](../user-guide/gpu.md#precision) |
+| Memory estimate against measured peaks | `benchmarks/memory_estimate.py` | [upper bound in all 11 cases](../user-guide/gpu.md#memory) |
+| SIMPLE/SIMPLEC stability against mesh skew | `benchmarks/skew_envelope.py` | [stable α_p ≈ cos²θ](../theory/simplec.md#skewed-meshes-measured-stability-envelope) |
+| Planner placement and overhead | `benchmarks/planner_unstructured.py` | [planner study](planner.md) |
+
 ## Failing checks
 
-Two of the 70 acceptance checks fail in the committed run. Both are reported as measured, and
-their criteria were fixed before the run.
+Two of the 70 acceptance checks fail in the committed run (FlowTrace 0.2.0; the re-run on the
+release code is in progress). Both are reported as measured, and their criteria were fixed
+before the run.
 
 * **Realizable k-ε, flat plate (`flat_plate_kepsilon`).** Over 10⁶ < Re_x < 10⁷, Cf is on
   average 7.0 % below Schultz-Grunow (criterion: within 6 %) and 11.4 % below White (within
   12 %, passes). The wall-function mesh puts the first cell at y⁺ ≈ 56. SST on a wall-resolved
-  mesh is 5.3 % and 9.8 % below the same correlations. The cause has not been isolated yet:
-  candidates are the scalable wall function at this y⁺ and the model itself.
+  mesh is 5.3 % and 9.8 % below the same correlations. **Cause found since:** the wall
+  function paired κ = 0.41 with Fluent's E = 9.793, a combination that matches neither Fluent
+  nor the classical log law. With Fluent's κ = 0.4187 (now the code's value) the same case is
+  4.96 % below Schultz-Grunow. The remaining deviation depends on y⁺ (−7.3 % at y⁺ ≈ 30, −2.1 %
+  at y⁺ ≈ 105; [turbulence theory](../theory/turbulence.md)).
 * **Warm start, cylinder at Re = 40 (`warmstart_proxy`).** The warm run needs 1,085 iterations
   to reach the converged field, the cold run 700 (×0.65; criterion > 1). This is a property of
   the test meshes, not a solver fault. The pre-solve mesh resolves the cylinder by 12
@@ -44,7 +58,9 @@ their criteria were fixed before the run.
   (`benchmarks/warmstart_cylinder_wake.py`, [table](warmstart.md#the-cylinder-case)). The interpolated field is the
   right answer on the wrong mesh. The wake has to grow by a quarter, which SIMPLEC does more
   slowly than it develops the wake from rest. A warm start pays off when the pre-solve mesh
-  resolves the geometry the way the target mesh does, and on this mesh pair it does not.
+  resolves the geometry the way the target mesh does, and on this mesh pair it does not. A
+  pre-registered test confirmed this: with matched meshes the warm start saves ×1.58 (8 cells/D)
+  and ×2.04 (12 cells/D) ([details](warmstart.md#the-cylinder-case)).
 
 ## Known deviations
 

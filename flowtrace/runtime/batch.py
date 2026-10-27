@@ -81,6 +81,12 @@ def _run_one(job: dict, backend: str) -> dict:
                     "wall_forces": solver.wall_forces(),
                     "heat_flow": solver.heat_flow() if case.energy else {},
                     "stability_rollbacks": len(getattr(getattr(solver, "flow", solver), "guard_events", []))})
+        try:
+            from ..unstructured.diagnostics import summary
+
+            res["diagnostics"] = summary(solver.diagnostics())
+        except Exception as exc:  # a diagnostics failure must not turn a solved case into an error
+            res["diagnostics_error"] = f"{type(exc).__name__}: {exc}"
         if job.get("out_dir"):
             from ..fluent.export import write_interpolation_file
 

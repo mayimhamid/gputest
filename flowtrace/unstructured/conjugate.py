@@ -220,6 +220,15 @@ class ConjugateSolver:
             r[k] = dict(r[k], energy=self._res_energy)
         return r
 
+    def diagnostics(self) -> dict:
+        """Diagnostics of the flow solver's latest iteration on the fluid sub-mesh (cell
+        indices refer to that sub-mesh). The conjugate energy equation is solved here, not
+        by the flow solver; its residual is in :meth:`residuals`."""
+        d = self.flow.diagnostics()
+        if d.get("available"):
+            d["scope"] = "fluid cells (flow sub-mesh); conjugate energy reported by residuals()"
+        return d
+
     def cell_centres(self) -> np.ndarray:
         return self.fv.geometry.cell_centre
 

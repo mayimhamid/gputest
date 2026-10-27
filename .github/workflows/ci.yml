@@ -30,7 +30,16 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest]
-        python: ["3.9", "3.10", "3.11", "3.12"]
+        python: ["3.9", "3.10", "3.11", "3.12", "3.13"]
+        exclude:
+          # actions/setup-python has no Python 3.9 (end of life since October 2025) for
+          # ubuntu-latest = Ubuntu 26.04, so that cell failed in setup and the jobs that need
+          # the matrix (package, benchmarks-quick) never ran; Ubuntu 24.04 still has 3.9.25
+          - os: ubuntu-latest
+            python: "3.9"
+        include:
+          - os: ubuntu-24.04
+            python: "3.9"
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -64,6 +73,21 @@ jobs:
           cache: pip
       - run: python -m pip install -e ".[cpu,amg,h5,report]" pytest
       - run: python -m pytest -q
+
+  fluent-files:
+    # readers and writers against files written by Ansys Fluent itself: the PyFluent mixing-elbow
+    # example (ansys/example-data, MIT licence, ~9 MB, SHA-256 checked), fetched at run time
+    needs: lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: python -m pip install -e ".[h5]" pytest
+      - run: python benchmarks/fluent_files_check.py
+      - run: python -m pytest -q tests/test_fluent_files.py
 
   benchmarks-quick:
     needs: test

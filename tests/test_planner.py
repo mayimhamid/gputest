@@ -111,3 +111,51 @@ def test_guard_recovers_simplec_on_45_degree_sheared_mesh():
     assert s.converged and s.guard_events and s.relax_p < 0.5
     assert np.isfinite(s.fields()["velocity-magnitude"]).all()
     assert s.describe()["stability_rollbacks"] == s.guard_events
+
+
+def test_gpu_not_timed_when_it_cannot_repay_its_setup(gpu):
+    """Even at its floor speed the GPU cannot pay back its measured set-up time over the few
+    iterations left, so it is not tried; with many iterations left it is."""
+    cal = {"cpu_us_per_cell": 1.0, "gpu_floor_ms": 0.0, "gpu_setup_ms": 60_000.0}
+    mesh, case = _cavity()
+    case.max_iter = 30
+    plan, solver = plan_unstructured(mesh, case, calibration=cal, max_steps=3)
+    assert plan.device == "cpu" and "set-up time" in plan.skipped["cupy"] and solver.be.device == "cpu"
+    mesh, case = _cavity()  # max_iter 1e6: a floor-speed GPU could repay 60 s
+    plan, _ = plan_unstructured(mesh, case, calibration=cal, max_steps=3)
+    assert "cupy" in plan.measured_ms_per_iteration
+
+
+def test_calibration_records_a_warm_gpu_setup_time(gpu, monkeypatch, tmp_path):
+    from flowtrace.hardware import planner
+
+    monkeypatch.setattr(planner, "PLANNER_CACHE", str(tmp_path / "planner.json"))
+    cal = planner.calibrate_unstructured(gpu="cupy", cpu="numpy", use_cache=False)
+    assert cal["gpu_setup_ms"] > 0 and cal["gpu_floor_ms"] > 0 and cal["cpu_us_per_cell"] > 0
+
+
+def test_memory_budget_falls_back_to_the_cpu_then_refuses_with_advice(gpu, monkeypatch):
+    """A device the case does not fit on is skipped (GPU -> CPU fallback). When it fits on none,
+    the planner refuses before allocating, says what would help, and FLOWTRACE_MEMORY_CHECK=off
+    lets the run start anyway."""
+    from flowtrace.hardware.backend import Backend
+
+    real = Backend.mem_info
+
+    def gpu_full(self):
+        return (1 << 20, 8 << 30) if self.is_gpu else real(self)
+
+    monkeypatch.setattr(Backend, "mem_info", gpu_full)
+    mesh, case = _cavity()
+    plan, solver = plan_unstructured(mesh, case, calibration={"cpu_us_per_cell": 1.0, "gpu_floor_ms": 0.0})
+    assert plan.device == "cpu" and "does not fit in memory" in plan.skipped["cupy"] and solver.be.device == "cpu"
+
+    monkeypatch.setattr(Backend, "mem_info", lambda self: (1 << 20, 8 << 30))  # 1 MB free everywhere
+    with pytest.raises(MemoryError) as exc:
+        plan_unstructured(*_cavity(), calibration={"cpu_us_per_cell": 1.0, "gpu_floor_ms": 0.0})
+    assert "upper bound" in str(exc.value) and "FLOWTRACE_MEMORY_CHECK=off" in str(exc.value)
+    with pytest.raises(MemoryError):  # an explicit CPU choice is refused the same way
+        plan_unstructured(*_cavity(backend="numpy"))
+    monkeypatch.setenv("FLOWTRACE_MEMORY_CHECK", "off")
+    plan, solver = plan_unstructured(*_cavity(backend="numpy"))
+    assert solver.be.device == "cpu" and any("running anyway" in a for a in plan.memory["numpy"]["advice"])

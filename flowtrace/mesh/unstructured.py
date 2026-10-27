@@ -143,6 +143,21 @@ class Geometry:
         return float(self.cell_volume.sum())
 
 
+def reverse_face_nodes(face_ptr: np.ndarray, face_nodes: np.ndarray) -> np.ndarray:
+    """Every face's node list reversed (flips the right-hand-rule normal of a 3-D face).
+
+    Fluent stores a 3-D face so that the right-hand-rule normal of its node order points
+    toward its c0 cell (into the domain on boundary faces): measured on Fluent-written CFF
+    files, and the convention OpenFOAM's ``fluentMeshToFoam`` reads. FlowTrace's own
+    convention is the right-hand normal pointing *out of* the owner (= c0), so the Fluent
+    readers and writers reverse every 3-D face. In 2-D the normal ``(n1 - n0) x z`` used by
+    :func:`compute_geometry` already points out of c0 for Fluent's ordering.
+    """
+    counts = np.diff(face_ptr)
+    idx = np.repeat(face_ptr[:-1] + face_ptr[1:] - 1, counts) - np.arange(face_nodes.size)
+    return face_nodes[idx]
+
+
 def _face_geometry(mesh: UnstructuredMesh):
     X = mesh.nodes
     nf = mesh.n_faces

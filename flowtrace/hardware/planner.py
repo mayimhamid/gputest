@@ -42,6 +42,8 @@ class ExecutionPlan:
     memory: Dict[str, dict] = field(default_factory=dict)
     measured_ms_per_step: Dict[str, float] = field(default_factory=dict)
     notes: List[str] = field(default_factory=list)
+    precision_reason: str = ""  # why this precision (accuracy test, user choice, device)
+    precision_by_backend: Dict[str, str] = field(default_factory=dict)  # the decision for every candidate
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -76,8 +78,10 @@ def plan_structured(case, autotune: bool = True, steps: Optional[int] = None,
                     profile: Optional[SystemProfile] = None, keep_solver: bool = True):
     """Return (plan, solver). ``solver`` is the already-built winning solver
     (it has advanced ``2 + steps`` time steps) or None when not autotuning."""
+    import numpy as np
+
     from ..structured.sequencing import fmg_factors
-    from ..structured.solver import MACSolver, resolve_dtype
+    from ..structured.solver import MACSolver, fp32_admissible, fp32_round_off_bound, resolve_dtype
 
     profile = profile or cached_profile()
     cands = _candidates(case.backend)
@@ -87,6 +91,7 @@ def plan_structured(case, autotune: bool = True, steps: Optional[int] = None,
         steps = 6 if cells <= 256 ** 2 else (3 if cells <= 1024 ** 2 else 1)
 
     memory, timings, solvers, notes = {}, {}, {}, []
+    precision_why: Dict[str, str] = {}
     for name in cands:
         be = get_backend(name)
         dtype = resolve_dtype(case, be)
@@ -105,6 +110,34 @@ def plan_structured(case, autotune: bool = True, steps: Optional[int] = None,
             solvers[name] = s
         except Exception as exc:  # a backend that fails at runtime is simply not chosen
             notes.append(f"{name}: failed during autotune ({exc})")
+            continue
+        if case.precision == "fp32":
+            bound = fp32_round_off_bound(case, s.dt)
+            precision_why[name] = "user choice (fp32)"
+            if case.steady_tol is not None and bound > case.steady_tol:
+                notes.append(f"precision fp32: its round-off bound {bound:.1e} exceeds steady_tol {case.steady_tol:g}; "
+                             "the residual will likely stall above it and the run end at max_steps")
+        elif case.precision == "fp64":
+            precision_why[name] = "user choice (fp64)"
+        elif be.is_gpu and not (profile.best_gpu is not None and profile.best_gpu.is_datacenter_fp64):
+            # consumer GPU: FP64 runs at a fraction of the FP32 rate, so FP32 is worth a look,
+            # but only for a case whose own convergence criterion FP32 can meet
+            ok, why = fp32_admissible(case, s.dt)
+            precision_why[name] = why
+            if ok:
+                try:
+                    s32 = MACSolver(case, backend=be, dtype=np.float32)
+                    t32 = _time_solver(s32, steps) * 1e3
+                    notes.append(f"{name}: FP64 {timings[name]:.2f} ms/step, FP32 {t32:.2f} ms/step")
+                    if t32 < timings[name]:
+                        timings[name], solvers[name] = t32, s32
+                        precision_why[name] += "; FP32 measured faster"
+                    else:
+                        precision_why[name] += "; FP64 measured as fast, kept"
+                except Exception as exc:
+                    notes.append(f"{name}: FP32 candidate failed ({exc})")
+        else:
+            precision_why[name] = "FP64 (CPU, or a GPU with full-rate FP64)"
     if autotune and timings:
         best = min(timings, key=timings.get)
     else:
@@ -115,7 +148,8 @@ def plan_structured(case, autotune: bool = True, steps: Optional[int] = None,
     be = get_backend(best)
     solver = solvers.get(best) if keep_solver else None
     if solver is None:
-        solver = MACSolver(case, backend=be)
+        kept = solvers.get(best)
+        solver = MACSolver(case, backend=be, dtype=kept.dtype if kept is not None else None)
     for n in list(solvers):
         if n != best:
             del solvers[n]
@@ -126,6 +160,7 @@ def plan_structured(case, autotune: bool = True, steps: Optional[int] = None,
         pressure=desc["pressure_detail"], diffusion=desc["diffusion"],
         fmg=fmg_factors(case), memory=memory,
         measured_ms_per_step={k: round(v, 3) for k, v in timings.items()}, notes=notes,
+        precision_reason=precision_why.get(best, "FP64 (default)"), precision_by_backend=dict(precision_why),
     )
     dev_label = f"GPU ({gpu.name})" if be.is_gpu and gpu else ("CPU" if not be.is_gpu else "GPU")
     stencil_impl = {"numpy": "vectorised NumPy", "numba": "Numba fused multi-core kernels",
@@ -137,6 +172,7 @@ def plan_structured(case, autotune: bool = True, steps: Optional[int] = None,
     p_reason = ("autotuned: " + ", ".join(f"{k} {v * 1e3:.2f} ms" for k, v in pt.items())) if pt else (
         "immersed obstacles make the operator non-separable" if has_obs else "user choice")
     plan.placements = [
+        Placement("Numerical precision", dev_label, desc["precision"], plan.precision_reason),
         Placement("Case setup, masks, eigen-decompositions", "CPU", "NumPy/LAPACK (once)",
                   "one-off O(N) / O(n^3) work; results moved to the compute device"),
         Placement("Convection-diffusion stencils", dev_label, f"{stencil_impl}, {case.scheme}",
@@ -300,7 +336,9 @@ def calibrate_unstructured(gpu: Optional[str] = "cupy", cpu: str = "numpy", prec
     """Machine constants of the SIMPLEC cost model, measured once and cached.
 
     ``gpu_floor_ms``: median iteration on a 16x16 mesh (launch/sync bound, a
-    lower bound for any mesh); ``cpu_us_per_cell``: mean CPU cost per cell and
+    lower bound for any mesh); ``gpu_setup_ms``: building a second 16x16 solver once
+    the device is warm (context, compiled kernels and caches already exist), a lower
+    bound for setting up any case; ``cpu_us_per_cell``: mean CPU cost per cell and
     iteration on 64x64. A cached entry is reused only if it was measured with the
     same GPU (name and driver) as the one present now.
     """
@@ -321,6 +359,11 @@ def calibrate_unstructured(gpu: Optional[str] = "cupy", cpu: str = "numpy", prec
             s = _cavity_solver(16, gbe, precision)
             ts = time_iterations(s, 10, warmup=3)
             out["gpu_backend"], out["gpu_floor_ms"] = gpu, 1e3 * statistics.median(ts)
+            del s
+            t0 = time.perf_counter()
+            s = _cavity_solver(16, gbe, precision)
+            gbe.synchronize()
+            out["gpu_setup_ms"] = 1e3 * (time.perf_counter() - t0)
             del s
         except Exception as exc:  # recorded, not cached as a valid floor
             out["gpu_error"] = str(exc)
@@ -447,11 +490,28 @@ def plan_unstructured(mesh, case, autotune: bool = True, max_steps: Optional[int
     def gpu_hopeless(floor) -> bool:
         return cpu in timings and floor is not None and timings[cpu] < GPU_FLOOR_MARGIN * floor
 
+    def gpu_cannot_pay_back(c: Optional[dict]) -> Optional[str]:
+        """Why timing the GPU cannot pay off, or None. Even at its floor speed, the GPU saves at most
+        (t_cpu - floor) per iteration; over the iterations this case may still run (at most max_iter
+        minus those done) that must exceed its measured warm set-up time, a lower bound for the
+        real cost of trying it."""
+        c = c or {}
+        floor, setup = c.get("gpu_floor_ms"), c.get("gpu_setup_ms")
+        if cpu not in timings or floor is None or setup is None:
+            return None
+        remaining = max(int(case.max_iter) - int(getattr(solvers[cpu], "iteration", 0)), 0)
+        best_saving = remaining * max(timings[cpu] - floor, 0.0)
+        if best_saving >= setup:
+            return None
+        return (f"not timed: at its floor of {floor:.1f} ms/it the GPU would save at most {best_saving / 1e3:.2f} s over "
+                f"the {remaining:,} iterations left, less than its measured set-up time of {setup / 1e3:.2f} s")
+
     floor = (cal or {}).get("gpu_floor_ms")
-    if gpu_hopeless(floor):  # decided from the cached floor: CUDA is never initialised
+    no_payback = gpu_cannot_pay_back(cal)
+    if gpu_hopeless(floor) or no_payback:  # decided from the cached calibration: CUDA is never initialised
         plan.calibration = cal
-        skipped["cupy"] = (f"not timed: the CPU's {timings[cpu]:.1f} ms/it is below {GPU_FLOOR_MARGIN:g} x the GPU "
-                           f"floor of {floor:.1f} ms/it measured on this machine")
+        skipped["cupy"] = no_payback or (f"not timed: the CPU's {timings[cpu]:.1f} ms/it is below {GPU_FLOOR_MARGIN:g} x "
+                                         f"the GPU floor of {floor:.1f} ms/it measured on this machine")
         return finish(cpu, f"fastest measured: {cpu} {timings[cpu]:.2f} ms/it; GPU {skipped['cupy']}", solvers[cpu])
     gpu = gpu_ready()
     if gpu is not None:
@@ -459,9 +519,10 @@ def plan_unstructured(mesh, case, autotune: bool = True, max_steps: Optional[int
             cal = calibrate_unstructured(gpu=gpu, cpu="numpy", precision=case.precision)
         plan.calibration = cal
         floor = cal.get("gpu_floor_ms")
-        if gpu_hopeless(floor):
-            skipped[gpu] = (f"not timed: the CPU's {timings[cpu]:.1f} ms/it is below {GPU_FLOOR_MARGIN:g} x the "
-                            f"GPU floor of {floor:.1f} ms/it measured on this machine")
+        no_payback = gpu_cannot_pay_back(cal)
+        if gpu_hopeless(floor) or no_payback:
+            skipped[gpu] = no_payback or (f"not timed: the CPU's {timings[cpu]:.1f} ms/it is below {GPU_FLOOR_MARGIN:g} x "
+                                          f"the GPU floor of {floor:.1f} ms/it measured on this machine")
         else:
             r = time_on(gpu)
             if r is not None:
