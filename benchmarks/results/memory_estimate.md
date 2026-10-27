@@ -1,13 +1,13 @@
-Measured 2026-10-27T09:59:54 with FlowTrace 0.3.0 on AMD Ryzen 9 7940HS w/ Radeon 780M Graphics (CPU). Peak allocated: tracemalloc. Peak RSS growth: VmHWM - VmRSS of a fresh process whose peak was reset after the imports and a warm-up solve (Linux).
+Measured 2026-10-27T10:17:48 with FlowTrace 0.3.0 on AMD Ryzen 9 7940HS w/ Radeon 780M Graphics (CPU). Peak allocated: tracemalloc. Peak RSS growth: VmHWM - VmRSS of a fresh process whose peak was reset after the imports and a warm-up solve (Linux).
 
 | Solver | Case | Peak allocated | Peak RSS growth | Estimate | Estimate / peak | Estimate / RSS growth | Upper bound |
 |---|---|---|---|---|---|---|---|
-| SIMPLEC | 2-D, 4,096 cells, laminar | 12.3 MB | - | 18.2 MB | 1.48 | - | yes |
-| SIMPLEC | 2-D, 16,384 cells, laminar | 28.5 MB | - | 42.6 MB | 1.49 | - | yes |
-| SIMPLEC | 2-D, 65,536 cells, laminar | 113.0 MB | - | 140.1 MB | 1.24 | - | yes |
-| SIMPLEC | 2-D, 16,384 cells, laminar, energy | 28.9 MB | - | 43.6 MB | 1.51 | - | yes |
-| SIMPLEC | 2-D, 16,384 cells, k-omega-sst | 31.7 MB | - | 42.6 MB | 1.34 | - | yes |
-| SIMPLEC | 3-D, 32,768 cells, laminar | 85.5 MB | - | 110.2 MB | 1.29 | - | yes |
+| SIMPLEC | 2-D, 4,096 cells, laminar | 12.0 MB | - | 17.0 MB | 1.42 | - | yes |
+| SIMPLEC | 2-D, 16,384 cells, laminar | 27.2 MB | - | 38.0 MB | 1.40 | - | yes |
+| SIMPLEC | 2-D, 65,536 cells, laminar | 107.7 MB | - | 121.7 MB | 1.13 | - | yes |
+| SIMPLEC | 2-D, 16,384 cells, laminar, energy | 27.6 MB | - | 39.0 MB | 1.41 | - | yes |
+| SIMPLEC | 2-D, 16,384 cells, k-omega-sst | 30.4 MB | - | 38.0 MB | 1.25 | - | yes |
+| SIMPLEC | 3-D, 32,768 cells, laminar | 83.6 MB | - | 96.1 MB | 1.15 | - | yes |
 | MAC | cavity 128x128 | 4.0 MB | - | 6.8 MB | 1.68 | - | yes |
 | MAC | cavity 256x256 | 16.0 MB | - | 26.9 MB | 1.69 | - | yes |
 | MAC | cavity 512x512 | 63.8 MB | - | 107.6 MB | 1.69 | - | yes |

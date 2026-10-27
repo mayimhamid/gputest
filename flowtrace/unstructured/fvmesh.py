@@ -39,6 +39,24 @@ def _batched_inverse(G: np.ndarray) -> np.ndarray:
     return out
 
 
+class _LeanGeometry:
+    """Cell geometry kept in memory; the per-face arrays (7 doubles per face, 0.6 GB on a
+    10.9M-face mesh) are recomputed on access, which only wall-distance set-up does."""
+
+    def __init__(self, mesh, geo):
+        self._mesh = mesh
+        self.cell_centre, self.cell_volume, self.flipped_faces = geo.cell_centre, geo.cell_volume, geo.flipped_faces
+
+    @property
+    def total_volume(self) -> float:
+        return float(self.cell_volume.sum())
+
+    def __getattr__(self, name):
+        if name in ("face_centre", "face_area_vec", "face_area"):
+            return getattr(compute_geometry(self._mesh), name)
+        raise AttributeError(name)
+
+
 class FVMesh:
     def __init__(self, mesh: UnstructuredMesh, backend, dtype=np.float64):
         self.mesh = mesh
@@ -172,6 +190,7 @@ class FVMesh:
         # face centre minus its point on the P-N line (skewness correction of face values)
         dxm = xf - (w[:, None] * xc[P] + (1.0 - w)[:, None] * xN)
         del xf, xN, Tvec, d, S
+        self.geometry = geo = _LeanGeometry(mesh, geo)
         self.dxm = dev(dxm)
         self.slot_diag_d = xp.asarray(self.slot_diag)
         self.slot_PN_d = xp.asarray(self.slot_PN)

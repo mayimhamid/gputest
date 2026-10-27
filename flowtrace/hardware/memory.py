@@ -105,7 +105,7 @@ def estimate_unstructured(n_cells: int, n_faces: int, dim: int, itemsize: int, e
                           device: str, available: int, amg: bool = True) -> MemoryEstimate:
     nnz = n_cells + 2 * n_faces
     bd = {
-        "mesh_geometry": n_faces * (2 * 8 + (3 * dim + 4) * itemsize) + n_cells * (dim + 1) * itemsize,
+        "mesh_geometry": n_faces * (2 * 8 + (3 * dim - 3) * itemsize) + n_cells * (dim + 1) * itemsize,
         "fields": n_cells * (dim + 2 + (1 if energy else 0)) * itemsize * 3,  # value, previous, gradients
         "gradients": n_cells * dim * (dim + 2) * itemsize,
         "face_data": n_faces * 8 * itemsize,
