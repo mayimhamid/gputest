@@ -474,7 +474,7 @@ class SimpleSolver:
             Yb = xp.where(fixed, self.Yb[name], Y[fv.Pb])
             gY = fv.gradient(Y, Yb)
             diag, aPN, aNP, Db = self._coefficients(gam, self.Ydir[name])
-            rhs = self._rhs(gam, Y, gY, Yb, Db)
+            rhs = self._rhs(gam, Y, gY, Yb, Db, scheme=c.scalar_scheme)
             diag, rhs = self._time_terms(f"Y:{name}", Y, diag, rhs)
             A = fv.matrix(diag, aPN, aNP)
             res[name] = self._residual(A, diag, Y, rhs)
@@ -795,7 +795,7 @@ class SimpleSolver:
         if self.energy_source is not None:
             q_in = q_in + self.energy_source
         diag, aPN, aNP, Db = self._coefficients(gam, fixed.astype(self.dtype))
-        rhs = self._rhs(gam, T, gT, Tb, Db, q_in)
+        rhs = self._rhs(gam, T, gT, Tb, Db, q_in, scheme=c.scalar_scheme)
         if self.rad is not None:
             dd, rr = self.rad.energy_terms(T)
             diag = diag + dd

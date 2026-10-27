@@ -62,6 +62,9 @@
             <input type="file" id="meshFile" class="hidden" accept=".msh,.gz,.cas,.h5,.txt" aria-hidden="true" tabindex="-1">
             <div id="meshSummary" class="desc" aria-live="polite"></div>
             <div id="meshQuality" class="desc"></div>
+            <label class="field"><span data-i18n="meshUnits">Mesh length unit</span><select id="meshUnits"><option value="auto">Auto-detect</option><option value="m">m</option><option value="mm">mm</option><option value="cm">cm</option><option value="in">in</option></select></label>
+            <label class="field"><span data-i18n="autoOpts">Auto-detect solver options</span><input type="checkbox" id="autoOpts" checked></label>
+            <div class="desc" data-i18n="autoHelp">Chooses turbulence model, energy equation, species, scalar scheme and iteration budget from the mesh and boundary values; every decision is written to the log.</div>
           </div>
           <div class="card hidden" id="zoneCard">
             <h3 data-i18n="bcs">Boundary conditions</h3>

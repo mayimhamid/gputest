@@ -10,6 +10,20 @@ Release-readiness work. Every claim below has a script, a test or a results file
 [`RELEASE_READINESS.md`](RELEASE_READINESS.md) lists the commands that were run, their outcomes,
 and what is still open.
 
+### Added
+- **Automatic solver options** (`flowtrace solve --auto`, the dashboard's "Auto-detect solver options"):
+  turbulence model from Re and the estimated wall y+, energy equation from the boundary temperatures,
+  species from the inlets, bounded scalar transport on skewed meshes, an iteration budget by mesh size.
+  Every decision is written to the log with its reason. `--units auto|m|mm|cm|in` (dashboard: "Mesh
+  length unit") scales the mesh to metres. `UnstructuredCase.scalar_scheme` sets the energy/species scheme.
+- **Thermal checks** in the validation: temperature within the fixed boundary values, and the
+  advected-enthalpy balance with adiabatic walls.
+- Stability guard: when `relax_p` is at its floor it falls back from SIMPLEC to SIMPLE with
+  `relax_u` 0.3 (two-inlet elbow, Re ~ 1e4, 45 deg skew: diverged before, converges in ~360 iterations).
+- Dashboard: a picture of 3-D meshes, a warm charcoal/orange theme, `.txt` mesh files.
+- Memory: the 3.2M-cell polyhedral rocket mesh fits in 8 GB (blocked geometry, leaner `FVMesh`,
+  recalibrated memory estimate).
+
 ### Changed (may change results, scripts or habits)
 - **`precision="auto"` is now FP64 unless FP32 is shown to meet the case's own accuracy
   target.** Before, `auto` chose FP32 on every consumer GPU without a check.

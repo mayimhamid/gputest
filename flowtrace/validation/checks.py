@@ -166,6 +166,8 @@ def validate_unstructured(solver, info=None) -> dict:
             outflow = float((fb[fb > 0] * yb[fb > 0]).sum())
             checks.append({"name": "Species conservation (out / in)", "value": outflow / inflow, "reference": 1.0,
                            "unit": "ratio", "pass": abs(outflow / inflow - 1.0) < 1e-4})
+    if c.energy and c.radiation == "off" and not c.solids and not c.unsteady and solver.T is not None:
+        checks.extend(_thermal_checks(solver))
     mb = solver.mass_balance()
     if mb:
         scale = max(max(abs(v) for v in mb.values()), 1e-30)
@@ -173,3 +175,31 @@ def validate_unstructured(solver, info=None) -> dict:
         checks.append({"name": "Global mass balance", "value": net / scale if scale > 1e-20 else net,
                        "unit": "relative", "pass": net <= 1e-6 * scale + 1e-12})
     return {"checks": checks}
+
+
+def _thermal_checks(solver) -> list:
+    """Energy equation checks that need no reference solution: the temperature stays within the fixed
+    boundary values (maximum principle, no internal sources), and with adiabatic walls the advected
+    enthalpy leaving equals what entered (mass-flux-weighted)."""
+    from ..unstructured.simple import T_ADIABATIC, T_FIXED, WALL
+
+    be = solver.be
+    T = be.to_numpy(solver.T).astype(float)
+    tk, tv = be.to_numpy(solver.tkind), be.to_numpy(solver.tval).astype(float)
+    fixed = tv[tk == T_FIXED]
+    out = []
+    if fixed.size and solver.energy_source is None:
+        lo, hi = float(fixed.min()), float(fixed.max())
+        worst = max(float(T.max()) - hi, lo - float(T.min()), 0.0)
+        rng = max(hi - lo, 1e-30)
+        out.append({"name": "Temperature within the boundary values (maximum principle)", "value": worst / rng,
+                    "reference": 0.0, "unit": "overshoot / range", "pass": worst <= 1e-3 * rng})
+    kind = be.to_numpy(solver.bkind)
+    fb = be.to_numpy(solver.Fb).astype(float)
+    adiabatic = bool(np.all(tk[kind == WALL] == T_ADIABATIC))
+    if adiabatic and (fb < 0).any() and (fb > 0).any():
+        h_in = float(-(fb[fb < 0] * tv[fb < 0]).sum())
+        h_out = float((fb[fb > 0] * T[solver.fv.Pb_h][fb > 0]).sum())
+        out.append({"name": "Energy balance, adiabatic walls (outflow / inflow of m cp T)", "value": h_out / h_in,
+                    "reference": 1.0, "unit": "ratio", "pass": abs(h_out / h_in - 1.0) < 2e-3})
+    return out

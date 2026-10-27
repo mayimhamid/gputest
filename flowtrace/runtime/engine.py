@@ -390,6 +390,21 @@ class Job:
             ucase = UnstructuredCase(boundaries=bnd, **cd)
             if not ucase.periodic:
                 ucase.periodic = default_periodic_pairs(mesh, ucase.boundaries)
+        units = self.spec.get("mesh_units") or "m"
+        if self.spec.get("auto") or units != "m":
+            from ..unstructured.autoconfig import auto_configure
+
+            if self.spec.get("auto"):
+                mesh, notes, _ = auto_configure(mesh, ucase, units=units)
+            else:
+                from ..mesh.unstructured import scale_mesh
+                from ..unstructured.autoconfig import UNIT_FACTORS
+
+                mesh = scale_mesh(mesh, UNIT_FACTORS[units])
+                notes = [f"mesh scaled by {UNIT_FACTORS[units]:g} ({units} -> m)"]
+            self.mesh = mesh
+            for n in notes:
+                self.log(n)
         self.case = ucase
         self.set_status("planning", name=ucase.name)
         self.log(f"Mesh {mesh.name}: {mesh.n_cells:,} cells, {mesh.n_faces:,} faces, {mesh.dim}D")

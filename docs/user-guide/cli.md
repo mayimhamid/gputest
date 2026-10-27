@@ -60,6 +60,18 @@ flowtrace solve mesh.msh --bc inlet=inlet:1.0 --bc outlet=outlet --mu 1.8e-5 --r
 
 `.msh`, legacy `.cas` (gzipped or not) and CFF `.cas.h5`/`.msh.h5` files are all accepted.
 
+### Automatic options and mesh units
+
+```bash
+flowtrace solve examples/elbow-mix.msh.txt --auto --units auto --rho 998.2 --mu 1.003e-3 --k 0.6 --cp 4182     --bc inf1=inlet:0.4:T293 --bc inf2=inlet:1.2:T313 --bc out=outlet:0
+```
+
+`--auto` prints one line per decision (Re and the estimated y+ choose the turbulence model, different
+inlet temperatures switch the energy equation on, a skewed mesh gets first-order energy transport so
+that the temperature stays between the boundary values). `--units` is the length unit of the mesh file
+(Fluent: General > Scale); `auto` reads an extent of 20 or more as millimetres, which the log states.
+The fluid properties and boundary values are never changed.
+
 ## Many cases at once: `flowtrace batch`
 
 A mesh-independence study, a Reynolds-number sweep or a set of design variants is a group of

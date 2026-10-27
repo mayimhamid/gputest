@@ -428,6 +428,7 @@ function buildSpec() {
   $$("#solidTable tr[data-solid]").forEach((tr) => { solids[tr.dataset.solid] = { conductivity: +$("input[data-k=k]", tr).value, source: +$("input[data-k=q]", tr).value }; });
   return {
     kind: "unstructured", mesh_id: S.meshId, checkpoint_seconds: +$("#ckpt").value || 0,
+    auto: $("#autoOpts").checked, mesh_units: $("#meshUnits").value,
     case: {
       name: S.meshInfo.name, boundaries: zoneSpecs(), density: +$("#uDensity").value, viscosity: +$("#uViscosity").value,
       energy: $("#uEnergy").checked || Object.keys(solids).length > 0 || $("#radModel").value !== "off",

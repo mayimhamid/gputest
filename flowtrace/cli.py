@@ -343,7 +343,8 @@ def cmd_solve(args):
                          f"(zones: {', '.join(sorted(zones))})")
     hub = EventHub()
     q = hub.subscribe()
-    job = Job({"kind": "unstructured", "mesh_id": "m", "case": case}, hub, args.workdir, meshes={"m": mesh})
+    spec = {"kind": "unstructured", "mesh_id": "m", "case": case, "auto": args.auto, "mesh_units": args.units}
+    job = Job(spec, hub, args.workdir, meshes={"m": mesh})
     job.start()
     last = 0.0
     while job.running or not q.empty():
@@ -549,6 +550,11 @@ def main(argv=None):
     p = sub.add_parser("solve", help="solve on a Fluent mesh with SIMPLE/SIMPLEC")
     physics_args(p)
     p.add_argument("--export")
+    p.add_argument("--auto", action="store_true",
+                   help="choose turbulence model, energy equation, species, scalar scheme and iteration budget "
+                        "from the mesh and boundary values (every decision is printed)")
+    p.add_argument("--units", default="m", choices=["auto", "m", "cm", "mm", "in"],
+                   help="length unit of the mesh (Fluent: General > Scale); 'auto' guesses it from the extent")
     p.set_defaults(func=cmd_solve)
     p = sub.add_parser("compressible", help="density-based solve (HLLC, Euler / NS / k-omega SST) on a Fluent mesh")
     p.add_argument("path")

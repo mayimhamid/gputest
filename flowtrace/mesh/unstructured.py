@@ -143,6 +143,16 @@ class Geometry:
         return float(self.cell_volume.sum())
 
 
+def scale_mesh(mesh: UnstructuredMesh, factor: float) -> UnstructuredMesh:
+    """Copy of ``mesh`` with every length multiplied by ``factor`` (Fluent: General > Scale; mm -> m is 1e-3)."""
+    import dataclasses
+
+    if not factor > 0:
+        raise ValueError("scale factor must be positive")
+    periodic = [dict(p, translation=np.asarray(p["translation"], dtype=float) * factor) for p in mesh.periodic]
+    return dataclasses.replace(mesh, nodes=mesh.nodes * factor, periodic=periodic)
+
+
 def reverse_face_nodes(face_ptr: np.ndarray, face_nodes: np.ndarray) -> np.ndarray:
     """Every face's node list reversed (flips the right-hand-rule normal of a 3-D face).
 

@@ -86,6 +86,9 @@ class UnstructuredCase:
     relax_p: Optional[float] = None
     relax_T: float = 1.0
     scheme: str = "second-order"  # upwind | second-order
+    # convection scheme of energy and species (None: as ``scheme``); first-order stays within the boundary
+    # values where the second-order scheme overshoots (skewed meshes)
+    scalar_scheme: Optional[str] = None  # None | upwind | second-order
     # pressure force in momentum: "green-gauss" = sum_f p_f S_f (face pressures, as
     # Fluent does; consistent on triangles) | "least-squares" (cell LS gradient)
     pressure_gradient: str = "green-gauss"
