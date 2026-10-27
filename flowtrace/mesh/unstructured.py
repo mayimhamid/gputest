@@ -176,20 +176,30 @@ def _face_geometry(mesh: UnstructuredMesh):
         S = np.stack([d[:, 1], -d[:, 0]], axis=1)  # (n1 - n0) x z
         return fc, S
     for k in np.unique(counts):
-        idx = np.nonzero(counts == k)[0]
-        nodes = fn[ptr[idx][:, None] + np.arange(k)[None, :]]  # (m, k)
-        P = X[nodes]  # (m, k, 3)
-        xc = P.mean(axis=1)
-        Pn = np.roll(P, -1, axis=1)
-        tri = 0.5 * np.cross(P - xc[:, None, :], Pn - xc[:, None, :])  # (m, k, 3)
-        Sk = tri.sum(axis=1)
-        nhat = Sk / np.maximum(np.linalg.norm(Sk, axis=1, keepdims=True), 1e-300)
-        w = np.einsum("mkd,md->mk", tri, nhat)
-        cent = (xc[:, None, :] + P + Pn) / 3.0
-        wsum = w.sum(axis=1, keepdims=True)
-        fc[idx] = (w[:, :, None] * cent).sum(axis=1) / np.where(np.abs(wsum) > 0, wsum, 1.0)
-        S[idx] = Sk
+        # blocks of faces bound the (m, k, 3) temporaries (a few GB at once on a 10M-face mesh)
+        idx_k = np.nonzero(counts == k)[0]
+        for lo in range(0, idx_k.size, _BLOCK):
+            _polygon_block(X, fn, ptr, idx_k[lo:lo + _BLOCK], k, fc, S)
     return fc, S
+
+
+_BLOCK = 1 << 19  # faces per block of the vectorised geometry kernels
+
+
+def _polygon_block(X, fn, ptr, idx, k, fc, S):
+    """Centres and area vectors of the k-node faces ``idx`` (fan triangulation about the node mean)."""
+    nodes = fn[ptr[idx][:, None] + np.arange(k)[None, :]]  # (m, k)
+    P = X[nodes]  # (m, k, 3)
+    xc = P.mean(axis=1)
+    Pn = np.roll(P, -1, axis=1)
+    tri = 0.5 * np.cross(P - xc[:, None, :], Pn - xc[:, None, :])  # (m, k, 3)
+    Sk = tri.sum(axis=1)
+    nhat = Sk / np.maximum(np.linalg.norm(Sk, axis=1, keepdims=True), 1e-300)
+    w = np.einsum("mkd,md->mk", tri, nhat)
+    cent = (xc[:, None, :] + P + Pn) / 3.0
+    wsum = w.sum(axis=1, keepdims=True)
+    fc[idx] = (w[:, :, None] * cent).sum(axis=1) / np.where(np.abs(wsum) > 0, wsum, 1.0)
+    S[idx] = Sk
 
 
 def compute_geometry(mesh: UnstructuredMesh, repair: bool = True) -> Geometry:
@@ -206,24 +216,34 @@ def compute_geometry(mesh: UnstructuredMesh, repair: bool = True) -> Geometry:
                     + np.bincount(nei[interior], fc[interior, d], minlength=nc))
     ca /= np.maximum(cnt, 1)[:, None]
     flipped = 0
+    nf = own.size
     if repair:
-        ref = np.where(interior[:, None], ca[np.where(interior, nei, 0)] - ca[own], fc - ca[own])
-        bad = np.einsum("fd,fd->f", S, ref) < 0
-        flipped = int(bad.sum())
-        S[bad] *= -1.0
-    # pyramid decomposition about the approximate centre
+        for lo in range(0, nf, _BLOCK):
+            sl = slice(lo, lo + _BLOCK)
+            o, n, it = own[sl], nei[sl], interior[sl]
+            ref = np.where(it[:, None], ca[np.where(it, n, 0)] - ca[o], fc[sl] - ca[o])
+            bad = np.einsum("fd,fd->f", S[sl], ref) < 0
+            flipped += int(bad.sum())
+            S[lo + np.nonzero(bad)[0]] *= -1.0
+    # pyramid decomposition about the approximate centre; per-face terms are computed in
+    # blocks and summed into cells by one bincount each (same summation order as unblocked)
     vol = np.zeros(nc)
     mom = np.zeros((nc, dim))
     frac = 2.0 / 3.0 if dim == 2 else 0.75
-    for cells, sign, mask in ((own, 1.0, slice(None)), (nei[interior], -1.0, interior)):
-        f_c = fc[mask]
-        s = S[mask] * sign
-        h = f_c - ca[cells]
-        v = np.einsum("fd,fd->f", s, h) / dim
-        cen = ca[cells] + frac * h
+    for cells, sign, faces in ((own, 1.0, None), (nei[interior], -1.0, np.nonzero(interior)[0])):
+        m = cells.size
+        v = np.empty(m)
+        vc = np.empty((dim, m))
+        for lo in range(0, m, _BLOCK):
+            sl = slice(lo, lo + _BLOCK)
+            f = sl if faces is None else faces[sl]
+            h = fc[f] - ca[cells[sl]]
+            v[sl] = np.einsum("fd,fd->f", S[f] * sign, h) / dim
+            vc[:, sl] = (v[sl][:, None] * (ca[cells[sl]] + frac * h)).T
         vol += np.bincount(cells, v, minlength=nc)
         for d in range(dim):
-            mom[:, d] += np.bincount(cells, v * cen[:, d], minlength=nc)
+            mom[:, d] += np.bincount(cells, vc[d], minlength=nc)
+        del v, vc
     if np.any(vol <= 0):
         raise ValueError(f"{int((vol <= 0).sum())} cells have non-positive volume")
     cc = mom / vol[:, None]

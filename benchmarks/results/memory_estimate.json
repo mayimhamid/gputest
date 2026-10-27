@@ -1,109 +1,103 @@
 {
  "meta": {
-  "date": "2026-10-26T21:35:33",
+  "date": "2026-10-27T09:59:54",
   "flowtrace": "0.3.0",
   "python": "3.13.17",
-  "cpu": "Intel(R) Xeon(R) Processor @ 2.80GHz"
+  "cpu": "AMD Ryzen 9 7940HS w/ Radeon 780M Graphics"
  },
  "rows": [
   {
    "solver": "SIMPLEC",
    "case": "2-D, 4,096 cells, laminar",
-   "peak_MB": 13.19926,
-   "estimate_MB": 19.417288,
-   "rss_MB": 9.261056,
-   "estimate_over_peak": 1.4710891368152457,
-   "upper_bound": true,
-   "estimate_over_rss": 2.0966602512715613
+   "peak_MB": 12.330887,
+   "estimate_MB": 18.188947,
+   "rss_MB": null,
+   "estimate_over_peak": 1.475072069024718,
+   "upper_bound": true
   },
   {
    "solver": "SIMPLEC",
    "case": "2-D, 16,384 cells, laminar",
-   "peak_MB": 30.730791,
-   "estimate_MB": 47.48774,
-   "rss_MB": 30.834688,
-   "estimate_over_peak": 1.545282059287052,
-   "upper_bound": true,
-   "estimate_over_rss": 1.5400752555044501
+   "peak_MB": 28.509232,
+   "estimate_MB": 42.598035,
+   "rss_MB": null,
+   "estimate_over_peak": 1.4941838840134312,
+   "upper_bound": true
   },
   {
    "solver": "SIMPLEC",
    "case": "2-D, 65,536 cells, laminar",
-   "peak_MB": 121.846082,
-   "estimate_MB": 159.588192,
-   "rss_MB": 130.080768,
-   "estimate_over_peak": 1.3097523480484172,
-   "upper_bound": true,
-   "estimate_over_rss": 1.2268392511335726
+   "peak_MB": 112.96311,
+   "estimate_MB": 140.07669,
+   "rss_MB": null,
+   "estimate_over_peak": 1.2400215433162207,
+   "upper_bound": true
   },
   {
    "solver": "SIMPLEC",
    "case": "2-D, 16,384 cells, laminar, energy",
-   "peak_MB": 31.142705,
-   "estimate_MB": 48.618236,
-   "rss_MB": 32.841728,
-   "estimate_over_peak": 1.5611436450366147,
-   "upper_bound": true,
-   "estimate_over_rss": 1.4803799605185208
+   "peak_MB": 28.928026,
+   "estimate_MB": 43.581075,
+   "rss_MB": null,
+   "estimate_over_peak": 1.5065347009851278,
+   "upper_bound": true
   },
   {
    "solver": "SIMPLEC",
    "case": "2-D, 16,384 cells, k-omega-sst",
-   "peak_MB": 33.939461,
-   "estimate_MB": 47.48774,
-   "rss_MB": 34.193408,
-   "estimate_over_peak": 1.399189574637028,
-   "upper_bound": true,
-   "estimate_over_rss": 1.388798098159739
+   "peak_MB": 31.68065,
+   "estimate_MB": 42.598035,
+   "rss_MB": null,
+   "estimate_over_peak": 1.3446073549627298,
+   "upper_bound": true
   },
   {
    "solver": "SIMPLEC",
    "case": "3-D, 32,768 cells, laminar",
-   "peak_MB": 94.177719,
-   "estimate_MB": 125.287062,
-   "rss_MB": 79.781888,
-   "estimate_over_peak": 1.330325934099126,
-   "upper_bound": true,
-   "estimate_over_rss": 1.5703697310346931
+   "peak_MB": 85.527534,
+   "estimate_MB": 110.24962,
+   "rss_MB": null,
+   "estimate_over_peak": 1.2890541191097593,
+   "upper_bound": true
   },
   {
    "solver": "MAC",
    "case": "cavity 128x128",
-   "peak_MB": 4.021943,
+   "peak_MB": 4.020473,
    "estimate_MB": 6.75659,
-   "estimate_over_peak": 1.6799318140510693,
+   "estimate_over_peak": 1.680546045204134,
    "upper_bound": true
   },
   {
    "solver": "MAC",
    "case": "cavity 256x256",
-   "peak_MB": 15.98224,
+   "peak_MB": 15.982915,
    "estimate_MB": 26.94731,
-   "estimate_over_peak": 1.686078422048474,
+   "estimate_over_peak": 1.6860072145788174,
    "upper_bound": true
   },
   {
    "solver": "MAC",
    "case": "cavity 512x512",
-   "peak_MB": 63.800499,
+   "peak_MB": 63.800396,
    "estimate_MB": 107.63339,
-   "estimate_over_peak": 1.6870305356075663,
+   "estimate_over_peak": 1.6870332591666046,
    "upper_bound": true
   },
   {
    "solver": "MAC",
    "case": "natural_convection 256x256",
-   "peak_MB": 20.197753,
+   "peak_MB": 20.197378,
    "estimate_MB": 32.21604,
-   "estimate_over_peak": 1.5950308927928767,
+   "estimate_over_peak": 1.5950605073589255,
    "upper_bound": true
   },
   {
    "solver": "MAC",
    "case": "cylinder 256x128",
-   "peak_MB": 11.208896,
+   "peak_MB": 11.209539,
    "estimate_MB": 19.848582,
-   "estimate_over_peak": 1.7707883095712549,
+   "estimate_over_peak": 1.770686733861223,
    "upper_bound": true
   }
  ]

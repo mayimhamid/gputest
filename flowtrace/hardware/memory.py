@@ -24,11 +24,22 @@ def _check_disabled() -> bool:
     return os.environ.get(OVERRIDE, "").strip().lower() in ("off", "0", "no", "false")
 
 
-def _verdict(req: int, available: int, device: str):
+# Largest measured peak / estimate (unstructured SIMPLEC, CPU, 4k cells to the 3.2M-cell rocket,
+# benchmarks/memory_estimate.py). Between this fraction of the upper bound and the bound itself a
+# CPU run is started with a warning: no measured case would have exceeded the free RAM, and the
+# operating system pages rather than failing. GPU memory cannot page, so the GPU keeps the bound.
+MEASURED_PEAK_FRACTION = 0.85
+
+
+def _verdict(req: int, available: int, device: str, tight_ok: bool = False):
     """(fits, advice) for an estimate of ``req`` bytes against ``available`` free bytes."""
     if available <= 0 or req <= available:
         return True, []
     need = f"Needs up to ~{_fmt(req)} but only {_fmt(available)} free on {device}."
+    if tight_ok and device == "cpu" and MEASURED_PEAK_FRACTION * req <= available:
+        return True, [need, f"Measured peaks were at most {MEASURED_PEAK_FRACTION:.2f} of this bound "
+                            f"(~{_fmt(MEASURED_PEAK_FRACTION * req)}), so the run starts; close other "
+                            "programs if the system starts paging."]
     if _check_disabled():
         return True, [need, f"Memory check disabled ({OVERRIDE}=off): running anyway."]
     return False, [need, f"To try anyway, set {OVERRIDE}=off."]
@@ -104,18 +115,18 @@ def estimate_unstructured(n_cells: int, n_faces: int, dim: int, itemsize: int, e
     }
     # The terms above leave out geometry and FV-mesh intermediates, the incidence and pattern
     # matrices (and their native-kernel copies), the per-iteration momentum, relaxed and
-    # pressure matrices and the gradient lists. Measured peaks (CPU, 4k-65k cells, 2-D and 3-D,
-    # laminar, energy and SST) were 1.9-3.3x the estimate without this term; with it they are
-    # 0.57-0.76x of it as traced allocations and 0.48-0.82x as resident-set growth, which
-    # varies by a few per cent between runs (benchmarks/memory_estimate.py). The GPU path
-    # stores the same arrays; its CuPy pool overhead has not been measured.
+    # pressure matrices, the AMG set-up and the gradient lists. With this term, measured peaks
+    # (CPU: 4k-65k cells 2-D and 3-D, laminar, energy and SST, as traced allocations; and the
+    # 3.2M-cell, 10.9M-face polyhedral rocket as resident-set growth) are 0.66-0.81x of the
+    # estimate (benchmarks/memory_estimate.py; rocket 0.76). The GPU path stores the same
+    # arrays; its CuPy pool overhead has not been measured.
     modelled = sum(bd.values())
-    bd["measured_overhead"] = int(1.3 * modelled + 8e6)
+    bd["measured_overhead"] = int(1.0 * modelled + 8e6)
     raw = sum(bd.values())
     req = int(raw * SAFETY)
-    fits, advice = _verdict(req, available, device)
+    fits, advice = _verdict(req, available, device, tight_ok=True)
     if not fits:  # an upper bound: say so, and what would help
-        advice[1:1] = ["This is an upper bound (measured CPU peaks were at most 0.82 of it).",
+        advice[1:1] = [f"This is an upper bound (measured CPU peaks were at most {MEASURED_PEAK_FRACTION:.2f} of it).",
                        "Run on the CPU (system RAM) or use a coarser mesh." if device == "gpu"
                        else "Use a coarser mesh, close other programs, or use a machine with more memory."]
     return MemoryEstimate(device=device, breakdown=bd, required=req, available=int(available), fits=fits,
