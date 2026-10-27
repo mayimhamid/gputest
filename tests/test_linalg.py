@@ -104,3 +104,12 @@ def test_amg_pcg_and_bicgstab():
     N = A + sp.diags(rng.uniform(0, 0.5, A.shape[0])) + 0.3 * sp.eye(A.shape[0], k=1)
     x, info = bicgstab(lambda v: N @ v, b, np, M=lambda v: v / N.diagonal(), tol=1e-10, maxiter=500)
     assert info.converged
+
+
+def test_pcg_breakdown_is_reported_not_raised():
+    """r.z = 0 with a non-zero search direction (r.z underflowing on a diverging outer iteration,
+    or a preconditioner that is not SPD): CG cannot continue and says so instead of raising
+    ZeroDivisionError, so the outer solver's divergence handling still runs."""
+    A = np.diag([1.0, 2.0])
+    x, info = pcg(lambda v: A @ v, np.array([1.0, 0.0]), np, M=lambda r: np.array([-r[1], r[0]]))
+    assert not info.converged and np.all(np.isfinite(x))

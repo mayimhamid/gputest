@@ -1,0 +1,106 @@
+{
+ "meta": {
+  "date": "2026-10-26T20:20:30",
+  "flowtrace": "0.3.0",
+  "python": "3.13.17",
+  "os": "Linux-6.18.44-fc-v153-x86_64-with-glibc2.39",
+  "files": {
+   "mixing_elbow.msh.h5": {
+    "sha256": "0e449d741dd7cdc48aa3f75e19f1f99281972b9f8d4637da2d1a6be25f9e2cb0"
+   },
+   "mixing_elbow.cas.h5": {
+    "sha256": "8145813f50f989a521ed8d1b02c891c7ca22ccc5fafa35a4eeba011949f19cbc"
+   },
+   "mixing_elbow.dat.h5": {
+    "sha256": "863a813227cf4274a9ca24fdad43e6c1f9f132dd62fcabc39a3be8cf493cff42"
+   }
+  },
+  "source": "PyFluent mixing-elbow example, ansys/example-data (MIT licence, Copyright Synopsys, Inc. and ANSYS, Inc.)"
+ },
+ "result": {
+  "source": "PyFluent mixing-elbow example, ansys/example-data (MIT licence, Copyright Synopsys, Inc. and ANSYS, Inc.)",
+  "mixing_elbow.msh.h5": {
+   "cells": 17822,
+   "faces": 91581,
+   "nodes": 66417,
+   "dim": 3,
+   "nodes_per_face": [
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9
+   ],
+   "zones": {
+    "wall-elbow": "wall",
+    "wall-inlet": "wall",
+    "outlet": "pressure-outlet",
+    "cold-inlet": "velocity-inlet",
+    "hot-inlet": "velocity-inlet",
+    "symmetry-xyplane": "symmetry",
+    "interior--elbow-fluid": "interior",
+    "elbow-fluid": "fluid"
+   },
+   "faces_reoriented": 0,
+   "closure_max": 1.9931237371076908e-16,
+   "volume": 152.59943151259972,
+   "min_cell_volume": 1.4912914904281869e-05
+  },
+  "mixing_elbow.cas.h5": {
+   "cells": 17822,
+   "faces": 91581,
+   "nodes": 66417,
+   "dim": 3,
+   "nodes_per_face": [
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9
+   ],
+   "zones": {
+    "wall-elbow": "wall",
+    "wall-inlet": "wall",
+    "outlet": "pressure-outlet",
+    "cold-inlet": "velocity-inlet",
+    "hot-inlet": "velocity-inlet",
+    "symmetry-xyplane": "symmetry",
+    "interior--elbow-fluid": "interior",
+    "elbow-fluid": "fluid"
+   },
+   "faces_reoriented": 0,
+   "closure_max": 1.9984343059363142e-16,
+   "volume": 0.0025006566505605884,
+   "min_cell_volume": 2.443788909630241e-10
+  },
+  "same_topology": true,
+  "volume_ratio_cas_over_msh": 1.6387064e-05,
+  "volume_ratio_expected": 1.6387064e-05,
+  "roundtrip_faces": 91581,
+  "roundtrip_same_cyclic_node_order": 91581,
+  "roundtrip_same_c0_c1": 91581,
+  "mass_flow_by_zone": {
+   "wall-elbow": 0.0002285666423499106,
+   "wall-inlet": -8.684053063882634e-06,
+   "outlet": 0.005109533917888655,
+   "cold-inlet": -0.004755065931145295,
+   "hot-inlet": -0.00034374111743318416,
+   "symmetry-xyplane": -3.5245093687558124e-05
+  },
+  "outlet_over_inlets": 1.0021037998119906,
+  "data_cells": 17822
+ },
+ "verdicts": {
+  "3-D polyhedral mesh read (17,822 cells, 91,581 faces)": true,
+  "zone types": true,
+  "no face re-oriented on read": true,
+  "every cell closes (|sum S| / sum |S| < 1e-12)": true,
+  "mesh and case: same topology, volumes in the ratio 0.0254^3": true,
+  "written back: Fluent's node order and c0/c1 for every face": true,
+  "data mapped to cells: outlet / inlets mass flow within 10 %": true
+ }
+}

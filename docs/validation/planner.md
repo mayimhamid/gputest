@@ -53,9 +53,21 @@ Compared with the old `auto`, which always chose the GPU, the planner is 2.4–2
 5,000 cells and 1.13–1.43× slower above 30,000 cells. Both overheads are fixed costs. At
 65,536 cells, a 2,000-iteration run at the measured 25 ms per iteration takes about 50 s, so
 the extra 1.7 s would be about 3 %. This study measures 100 iterations, though, and by its own
-criteria the planner is not yet good enough. Possible
-fixes, not yet implemented or measured: predict from the cached CPU cost per cell before
-timing the CPU, and stop timing once one device leads by a wide margin.
+criteria the planner is not yet good enough.
+
+## Changes after the study (not yet re-measured)
+
+* **9,216 cells: implemented, unmeasured.** The planner now skips the GPU when it cannot pay
+  for itself. Even at its floor cost, the GPU saves at most (CPU time − floor) per iteration.
+  Over the iterations left, that must exceed the GPU's measured set-up time (`gpu_setup_ms`,
+  added to the cached calibration). At 9,216 cells the CPU iteration (13–16 ms) is already below
+  the 16.6 ms floor, so the GPU would no longer be built and timed. That should remove the
+  2.2–2.4 s planning phase, but the study has **not been re-run on a GPU**: none was available
+  for this release. Until it is, A2 stands as failed. Unit tests check the rule's arithmetic
+  (`tests/test_planner.py`).
+* **65,536 cells: not addressed.** The ten CPU timing iterations before the move to the GPU
+  remain. Possible fixes, not implemented: predict the CPU cost from the cached cost per cell
+  before timing the CPU, and stop timing once one device leads by a wide margin.
 
 ## Reproduce
 

@@ -40,18 +40,42 @@ DIFF_LIMIT_AB2 = 0.2
 
 
 def resolve_dtype(case: StructuredCase, backend) -> np.dtype:
-    if case.precision == "fp64":
-        return np.dtype(np.float64)
+    """Precision a solver is built with: ``fp32`` and ``fp64`` as given; ``auto`` is FP64.
+
+    FP32 is never chosen without evidence: the execution planner (``plan_structured``) adds an
+    FP32 candidate only for cases that pass :func:`fp32_admissible`, and records why.
+    """
     if case.precision == "fp32":
         return np.dtype(np.float32)
-    if backend.is_gpu:
-        from ..hardware.probe import cached_profile
-
-        gpu = cached_profile().best_gpu
-        if gpu is not None and gpu.is_datacenter_fp64:
-            return np.dtype(np.float64)
-        return np.dtype(np.float32)
     return np.dtype(np.float64)
+
+
+U32 = 2.0 ** -24  # unit round-off of IEEE single precision
+
+
+def fp32_round_off_bound(case: StructuredCase, dt: float) -> float:
+    """u32 L / (U dt): the normalised steady residual that one step's velocity round-off produces.
+
+    The FP32 residual floor measured 0.07 to 0.33 times this bound on six cases
+    (benchmarks/precision_fp32.py); FP64 is 2^29 times lower."""
+    return U32 * min(case.lx, case.ly) / (case.u_ref * dt)
+
+
+def fp32_admissible(case: StructuredCase, dt: float):
+    """(admissible, reason): can an FP32 run meet this case's own convergence criterion?
+
+    Steady cases: only if the round-off bound is at or below ``steady_tol`` (a stalled residual
+    above it never reports convergence and runs to ``max_steps``). Transient cases have no
+    accuracy target to test against, so FP32 is left to an explicit ``precision="fp32"``.
+    """
+    if case.steady_tol is None:
+        return False, "FP64: transient case, no accuracy target to test FP32 against (precision='fp32' to choose it)"
+    bound = fp32_round_off_bound(case, dt)
+    if bound <= case.steady_tol:
+        return True, (f"FP32 admissible: its round-off bound u32 L/(U dt) = {bound:.1e} is within the steady "
+                      f"tolerance {case.steady_tol:g}")
+    return False, (f"FP64: FP32 would stall above the steady tolerance {case.steady_tol:g} (round-off bound "
+                   f"{bound:.1e}; measured floors 0.07-0.33 of the bound, benchmarks/precision_fp32.py)")
 
 
 class MACSolver:

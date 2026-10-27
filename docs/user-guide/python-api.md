@@ -39,6 +39,40 @@ while not solver.finished:
 print(solver.mass_balance(), solver.heat_flow())
 ```
 
+### Did the iteration really get there? Solver diagnostics
+
+`residuals()` gives Fluent-style scaled residuals. `diagnostics()` says what the latest
+iteration achieved on the systems it actually solved. It reports each equation's residual
+before and after its linear solve, as componentwise backward errors; the linear solver's real
+reduction; local and global continuity before and after the pressure correction; the change of
+every field; and whether any value is not finite:
+
+```python
+from flowtrace.unstructured.diagnostics import summary
+
+d = solver.diagnostics()               # full report; definitions in the theory manual
+s = summary(d)                         # the headline numbers, as in the dashboard and the log
+print(s["momentum_solve_row_scaled"], s["continuity_corrected_local_max"], s["finite"])
+```
+
+Definitions, normalisations and zero-denominator rules are in
+[Solver diagnostics](../theory/diagnostics.md).
+
+### Placement: let the planner decide, and read why
+
+```python
+from flowtrace.hardware.planner import plan_unstructured
+
+plan, solver = plan_unstructured(mesh, case)   # times real iterations; keeps the faster solver
+print(plan.backend, plan.reason)               # e.g. "numpy", "fastest measured: ..."
+print(plan.skipped)                            # devices not used, and why (memory, GPU floor, ...)
+```
+
+`plan_structured(case)` does the same for the MAC solver. Its plan starts with the precision
+decision (`plan.precision_reason`, and `plan.precision_by_backend` for every candidate). A case
+that fits on no device raises `MemoryError` with advice; set `FLOWTRACE_MEMORY_CHECK=off` to
+try anyway.
+
 ### Boundary kinds
 
 | `BoundarySpec.kind` | Fluent zone types mapped to it | Data |

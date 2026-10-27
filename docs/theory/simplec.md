@@ -59,6 +59,36 @@ The default is therefore automatic: 1.0 when the maximum non-orthogonality is �
 own advice to use skewness correction or a more conservative factor on skewed meshes. An
 explicit `relax_p` always takes precedence.
 
+## Skewed meshes: measured stability envelope
+
+The pressure-correction equation keeps only the orthogonal part of its Laplacian
+(\(\alpha = \mathbf S\cdot\mathbf S/\mathbf S\cdot\mathbf d\)); the non-orthogonal remainder is
+neglected, as in Fluent's default and in OpenFOAM without non-orthogonal correctors. A
+controlled sequence shows what that costs: lid-driven cavity, Re = 10, 24 × 24 quads sheared
+uniformly to the angle θ (so every face has non-orthogonality θ), 4,000 iterations at most.
+
+| θ | min. orthogonal quality | α_p = 1 | 0.8 | 0.5 | 0.33 | 0.2 | automatic + guard | SIMPLE (α_p 0.3) |
+|---|---|---|---|---|---|---|---|---|
+| 0°–20° | ≥ 0.94 | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| 30° | 0.87 | ✗ | ✗ (late) | ✓ | ✓ | ✓ | ✓ (1 rollback, 0.48) | ✗ |
+| 40° | 0.77 | ✗ | ✗ | ✓ (slow) | ✓ | ✓ | ✓ (1, 0.48) | ✗ |
+| 45° | 0.71 | ✗ | ✗ | ✗ (late) | ✓ | ✓ | ✓ (2, 0.29) | ✗ |
+| 50° | 0.64 | ✗ | ✗ | ✗ | ✓ (slow) | ✓ | ✓ (2, 0.29) | ✗ |
+| 55° | 0.57 | ✗ | ✗ | ✗ | stalls | ✓ | ✓ (3, 0.17) | ✗ |
+| 60° | 0.50 | ✗ | ✗ | ✗ | ✗ | ✓ | ✓ (3, 0.17) | ✗ |
+
+The largest stable α_p follows \(\cos^2\theta\) at every angle (0.75, 0.59, 0.50, 0.41, 0.33,
+0.25): the neglected part grows like \(\tan^2\theta\) relative to the retained one. Plain SIMPLE
+diverges as well, so the cause is the neglected non-orthogonal coupling, not SIMPLEC's
+consistent coefficients. Meshes whose skew alternates in sign from face to face (warped quads,
+triangles) tolerate far more: warped triangles at 43° converge at 0.8.
+
+The stability guard (automatic `relax_p` only) recovered every case in the table. It stops at
+`relax_p` = 0.1, which by the cos² law covers uniform skew up to about 70°. Beyond that, or with
+an explicit `relax_p`, a diverging run now ends with an error naming the mesh non-orthogonality,
+the guard's state and the cos² estimate. Non-orthogonal correctors for the pressure equation (the
+principled fix) are not implemented.
+
 ## Residuals and convergence
 
 Scaled residuals as in Fluent: momentum and energy use
@@ -66,6 +96,15 @@ Scaled residuals as in Fluent: momentum and energy use
 the first five iterations. For flows that start without any imbalance (periodic channels, warm
 starts), that denominator is floored at \(10^{-3}\sum|F|\), so convergence is not judged against
 round-off. `residuals()["raw"]` reports the absolute values.
+
+Where they are evaluated: the momentum and energy residuals belong to the assembled,
+*unrelaxed* system at the field the iteration started from (before its linear solve); the
+continuity residual is the imbalance of the Rhie–Chow *predictor* fluxes, before the pressure
+correction. When every velocity component is exactly zero in every cell (a cavity started from
+rest, first iteration) \(\sum|a_P\phi_P| = 0\) and the momentum value is the numerator divided by
+a \(10^{-300}\) floor, a very large number (\(\sim 10^{302}\)); convergence is only tested from the
+sixth iteration on. The [solver diagnostics](diagnostics.md) separate the pre-solve, solved and
+corrected states and are defined in that case.
 
 ## Energy
 

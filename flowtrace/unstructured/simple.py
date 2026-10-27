@@ -133,6 +133,7 @@ class SimpleSolver:
         # a user-set relaxation is left alone; transient runs restart every time step from a larger
         # residual than the previous step's converged inner iterations, which a growth test would misread
         self.guard_enabled = case.relax_p is None and not case.unsteady
+        self._capture = self._energy_capture = None  # systems of the latest iteration, see diagnostics()
         self._reset_guard()
         self.setup_seconds = time.perf_counter() - t0
 
@@ -157,6 +158,7 @@ class SimpleSolver:
         self.F = self.case.density * xp.sum(self.fv.face_interp_vec(self.U) * self.fv.S, axis=1)
         self.Fb = self._boundary_flux_fixed(ub)
         self._gp = self._gU = self._gT = None
+        self._capture = None  # the fields changed: the last iteration's systems no longer describe them
         self._reset_guard()
 
     def set_sources(self, momentum=None, energy=None) -> None:
@@ -498,6 +500,9 @@ class SimpleSolver:
     def step(self) -> float:
         if self.finished:
             return 0.0
+        # the previous iteration's systems are released first, so keeping them for
+        # diagnostics() never adds to the peak memory of an iteration
+        self._capture = self._energy_capture = None
         c, fv, xp = self.case, self.fv, self.xp
         rho, mu = c.density, c.viscosity
         dim = self.dim
@@ -564,12 +569,14 @@ class SimpleSolver:
             res[name] = num[k] / max(den[k], floor)
         diag_r = diag / au
         Ar = fv.matrix(diag_r, aPN, aNP)
-        its = []
+        its, brs, infos = [], [], []
         for k in range(dim):
             b = rhs_all[k] + ((1.0 - au) / au) * diag * U[:, k]
             x, info = self._solve(Ar, b, U[:, k], diag_r)
             Ustar[:, k] = x
             its.append(info.iterations)
+            brs.append(b)
+            infos.append(info)
         t2 = time.perf_counter()
         tm["momentum"] += t2 - t1
 
@@ -637,10 +644,16 @@ class SimpleSolver:
         ppb = (1.0 - self.m_pres) * pp[Pb]
         gpp = fv.gradient(pp, ppb)
         self.U = Ustar - dP[:, None] * gpp
+        # references (not copies) to the systems of this iteration, for diagnostics();
+        # every array here is rebound, never modified in place, by later iterations
+        cap = {"U_old": U, "p_old": p, "A": A, "b": rhs_all, "Ar": Ar, "br": brs, "U_star": Ustar,
+               "mom_info": infos, "alpha_u": au, "Fst": Fst, "Fbst": Fbst, "mass": mass, "Ap": Ap, "pp": pp,
+               "p_info": pinfo, "F": self.F, "Fb": self.Fb, "U_new": self.U, "p_new": self.p}
 
         # ---------------- energy ----------------
         if self.energy and not self.external_energy:
             res["energy"] = self._energy()
+            cap["energy"] = self._energy_capture
             if self.rad is not None:
                 res["p1"] = self.rad.solve(self.T, self._wall_temperature())
         t5 = time.perf_counter()
@@ -650,7 +663,9 @@ class SimpleSolver:
         if self.turb is not None:
             ubc = self._velocity_bvals(self.U, gU)
             gUc = [fv.gradient(self.U[:, k], ubc[:, k]) for k in range(dim)]
+            k_old, w_old = self.turb.k, self.turb.w
             res.update(self.turb.solve(gUc))
+            cap["turbulence"] = {"k": (k_old, self.turb.k), self.turb.second: (w_old, self.turb.w)}
             tm["turbulence"] += time.perf_counter() - t5
         if self.Y:
             t6 = time.perf_counter()
@@ -672,7 +687,11 @@ class SimpleSolver:
         flux_scale = float(xp.sum(xp.abs(self.F))) + float(xp.sum(xp.abs(self.Fb)))
         res["continuity"] /= max(self._res_max5["continuity"], 1e-3 * flux_scale)
         self._last_res = res
-        if self._stability_guard(self._last_raw["continuity"], flux_scale):
+        cap["iteration"] = self.iteration
+        rolled_back = self._stability_guard(self._last_raw["continuity"], flux_scale)
+        cap["rolled_back"] = rolled_back  # the guard discarded this iteration's fields
+        self._capture = cap
+        if rolled_back:
             self._last_res, self._last_raw = prev  # report the restored state, not the diverged one
             return 1.0
         if c.unsteady:
@@ -692,6 +711,7 @@ class SimpleSolver:
 
     def _reset_guard(self):
         self.guard_events = []
+        self.guard_exhausted_at = None  # iteration at which divergence was seen with relax_p at its floor
         self._guard_min = float("inf")
         self._guard_snap = (self.state_dict(), float("inf")) if self.guard_enabled else None
 
@@ -723,6 +743,8 @@ class SimpleSolver:
             self.guard_events.append({"detected_at": at, "restored_to": int(snap["iteration"]),
                                       "relax_p": round(self.relax_p, 4), "continuity": r})
             return True
+        if bad and self.guard_exhausted_at is None:  # cannot lower relax_p further: record it, do not roll back
+            self.guard_exhausted_at = self.iteration
         if math.isfinite(r) and self.iteration > 5:  # past the start-up transient
             self._guard_min = min(self._guard_min, r)
             if self.iteration % self.GUARD_EVERY == 0 and r <= 2.0 * self._guard_min:
@@ -761,7 +783,9 @@ class SimpleSolver:
         dr = diag / aT
         Ar = fv.matrix(dr, aPN, aNP)
         b = rhs + ((1.0 - aT) / aT) * diag * T
-        self.T, _ = self._solve(Ar, b, T, dr, tol=1e-3, maxiter=60)
+        self.T, info = self._solve(Ar, b, T, dr, tol=1e-3, maxiter=60)
+        self._energy_capture = {"A": A, "b": rhs, "T_old": T, "Ar": Ar, "br": b, "T_new": self.T, "alpha": aT,
+                                "info": info}
         return r
 
     # ------------------------------------------------------------------
@@ -773,10 +797,26 @@ class SimpleSolver:
 
     def residuals(self) -> dict:
         """scaled: Fluent-style (continuity normalised by the largest of the first
-        five iterations); raw: continuity as the absolute sum |mass imbalance|."""
+        five iterations); raw: continuity as the absolute sum |mass imbalance|.
+
+        Momentum/energy entries are the pre-solve residuals of the assembled, unrelaxed
+        system at the iteration-start field, sum|b - A phi| / sum|a_P phi_P|;
+        continuity is sum|m*| of the predictor (Rhie-Chow) fluxes, before the pressure
+        correction. :meth:`diagnostics` separates these from the solved and corrected states.
+        """
         r = dict(getattr(self, "_last_res", {}))
         raw = dict(getattr(self, "_last_raw", r))
         return {"raw": raw, "scaled": r, "normalized": r}
+
+    def diagnostics(self) -> dict:
+        """Algebraic, conservation and health diagnostics of the most recent outer iteration:
+        pre-solve and solved-system residuals (componentwise backward errors), predictor
+        and corrected local continuity, global boundary imbalance, field change per
+        iteration and non-finite counts. Computed on demand from the systems the
+        iteration solved; definitions in :mod:`flowtrace.unstructured.diagnostics`."""
+        from .diagnostics import evaluate
+
+        return evaluate(self)
 
     def describe(self) -> dict:
         amg = self._amg
@@ -788,6 +828,7 @@ class SimpleSolver:
             "convection": self.case.scheme,
             "relax_p": self.relax_p,
             "stability_rollbacks": list(self.guard_events),
+            "stability_guard_exhausted_at": self.guard_exhausted_at,
             "pressure_solver": "AMG-PCG (" + ("pyamg" if amg is not None and not hasattr(amg, "levels")
                                                else "FlowTrace SA-AMG") + ")",
             "max_non_orthogonality_deg": round(self.fv.non_orthogonality_deg, 2),
@@ -995,6 +1036,7 @@ class SimpleSolver:
                 self.Y[name] = xp.asarray(st[f"Y:{name}"], dtype=self.dtype)
         self.iteration = int(st.get("iteration", 0))
         self._gp = self._gU = self._gT = None
+        self._capture = None  # diagnostics describe an iteration, not a restored state
         if self.turb is not None:
             self.turb.load(st)
         if float(st.get("res_continuity_norm", 0.0)) > 0:

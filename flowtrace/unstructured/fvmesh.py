@@ -291,6 +291,14 @@ class FVMesh:
         data += xp.bincount(self.slot_NP_d, weights=a_NP, minlength=self.nnz).astype(self.dtype)
         return self._sparse.csr_matrix((data, self.indices_d, self.indptr_d), shape=(self.nc, self.nc))
 
+    def matrix_like(self, data):
+        """Cell-cell operator with the fixed sparsity pattern of :meth:`matrix` and the given
+        CSR data array (for instance ``|A.data|`` of a matrix that :meth:`matrix` returned)."""
+        if self.nat is not None:
+            n = self._n
+            return self.nat.csr_from_parts(data, n["indices"], n["indptr"], (self.nc, self.nc))
+        return self._sparse.csr_matrix((data, self.indices_d, self.indptr_d), shape=(self.nc, self.nc))
+
     def wall_distance(self, wall_bfaces_mask) -> np.ndarray:
         """Cell-centre distance to the nearest wall (host array); mask over boundary faces."""
         from ..mesh.unstructured import wall_distance

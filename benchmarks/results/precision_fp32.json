@@ -1,0 +1,332 @@
+{
+ "meta": {
+  "date": "2026-10-26T20:55:00",
+  "flowtrace": "0.3.0",
+  "python": "3.13.17",
+  "cpu": "Intel(R) Xeon(R) Processor @ 2.80GHz"
+ },
+ "rows": [
+  {
+   "case": "cavity",
+   "params": {
+    "re": 100,
+    "n": 32
+   },
+   "steady_tol": 1e-06,
+   "fp64": {
+    "steps": 3940,
+    "converged": true,
+    "min_normalized_residual": 9.83704300011171e-07,
+    "dt": 0.005206306158222831,
+    "round_off_bound": 1.144854777340575e-05,
+    "seconds": 6.376679420000073,
+    "checks": [
+     {
+      "name": "Centreline u vs Ghia et al. (Re=100)",
+      "value": 0.003324681431131571
+     },
+     {
+      "name": "Centreline v vs Ghia et al. (Re=100)",
+      "value": 0.007829644746168124
+     },
+     {
+      "name": "Discrete continuity max|div u|",
+      "value": 3.1086244689504383e-15
+     }
+    ]
+   },
+   "fp32": {
+    "steps": 4320,
+    "converged": true,
+    "min_normalized_residual": 9.57783158718407e-07,
+    "dt": 0.005206305417516668,
+    "round_off_bound": 1.1448549402201834e-05,
+    "seconds": 5.984105194000222,
+    "checks": [
+     {
+      "name": "Centreline u vs Ghia et al. (Re=100)",
+      "value": 0.0033265509271622473
+     },
+     {
+      "name": "Centreline v vs Ghia et al. (Re=100)",
+      "value": 0.007831405794620439
+     },
+     {
+      "name": "Discrete continuity max|div u|",
+      "value": 9.834766387939453e-07
+     }
+    ]
+   },
+   "fp32_vs_fp64_max_rel": {
+    "x-velocity": 2.581477636879894e-06,
+    "y-velocity": 4.759117706381247e-06
+   }
+  },
+  {
+   "case": "cavity",
+   "params": {
+    "re": 100,
+    "n": 64
+   },
+   "steady_tol": 1e-06,
+   "fp64": {
+    "steps": 4310,
+    "converged": true,
+    "min_normalized_residual": 9.849425242517085e-07,
+    "dt": 0.004740512029685811,
+    "round_off_bound": 1.2573461348085868e-05,
+    "seconds": 19.135187760000008,
+    "checks": [
+     {
+      "name": "Centreline u vs Ghia et al. (Re=100)",
+      "value": 0.004194972435945132
+     },
+     {
+      "name": "Centreline v vs Ghia et al. (Re=100)",
+      "value": 0.008457363819842662
+     },
+     {
+      "name": "Discrete continuity max|div u|",
+      "value": 7.105427357601002e-15
+     }
+    ]
+   },
+   "fp32": {
+    "steps": 12930,
+    "converged": false,
+    "min_normalized_residual": 1.1244688293266954e-06,
+    "dt": 0.004740509651563812,
+    "round_off_bound": 1.2573467655682989e-05,
+    "seconds": 40.63034896099998,
+    "checks": [
+     {
+      "name": "Centreline u vs Ghia et al. (Re=100)",
+      "value": 0.004198321607112976
+     },
+     {
+      "name": "Centreline v vs Ghia et al. (Re=100)",
+      "value": 0.008460595369338936
+     },
+     {
+      "name": "Discrete continuity max|div u|",
+      "value": 3.337860107421875e-06
+     }
+    ]
+   },
+   "fp32_vs_fp64_max_rel": {
+    "x-velocity": 4.145655384397438e-06,
+    "y-velocity": 7.723569609007406e-06
+   }
+  },
+  {
+   "case": "cavity",
+   "params": {
+    "re": 100,
+    "n": 128
+   },
+   "steady_tol": 1e-06,
+   "fp64": {
+    "steps": 8780,
+    "converged": true,
+    "min_normalized_residual": 9.938386404401644e-07,
+    "dt": 0.002327337006372339,
+    "round_off_bound": 2.5610663437306587e-05,
+    "seconds": 117.96004271499987,
+    "checks": [
+     {
+      "name": "Centreline u vs Ghia et al. (Re=100)",
+      "value": 0.005021893227673269
+     },
+     {
+      "name": "Centreline v vs Ghia et al. (Re=100)",
+      "value": 0.009056808168290437
+     },
+     {
+      "name": "Discrete continuity max|div u|",
+      "value": 1.4210854715202004e-14
+     }
+    ]
+   },
+   "fp32": {
+    "steps": 26340,
+    "converged": false,
+    "min_normalized_residual": 2.868889732338062e-06,
+    "dt": 0.002327336089879341,
+    "round_off_bound": 2.56106735226543e-05,
+    "seconds": 202.6443188809999,
+    "checks": [
+     {
+      "name": "Centreline u vs Ghia et al. (Re=100)",
+      "value": 0.005025261893272459
+     },
+     {
+      "name": "Centreline v vs Ghia et al. (Re=100)",
+      "value": 0.009060055065154976
+     },
+     {
+      "name": "Discrete continuity max|div u|",
+      "value": 7.4803829193115234e-06
+     }
+    ]
+   },
+   "fp32_vs_fp64_max_rel": {
+    "x-velocity": 4.0942956344566346e-06,
+    "y-velocity": 7.75474157078865e-06
+   }
+  },
+  {
+   "case": "cavity",
+   "params": {
+    "re": 1000,
+    "n": 128
+   },
+   "steady_tol": 1e-06,
+   "fp64": {
+    "steps": 58860,
+    "converged": true,
+    "min_normalized_residual": 9.996461401403347e-07,
+    "dt": 0.0016523123092873709,
+    "round_off_bound": 3.6073473786016664e-05,
+    "seconds": 540.5151492209998,
+    "checks": [
+     {
+      "name": "Centreline u vs Ghia et al. (Re=1000)",
+      "value": 0.003982217195090787
+     },
+     {
+      "name": "Centreline v vs Ghia et al. (Re=1000)",
+      "value": 0.011508244221443198
+     },
+     {
+      "name": "Discrete continuity max|div u|",
+      "value": 1.3378187446733136e-14
+     }
+    ]
+   },
+   "fp32": {
+    "steps": 176580,
+    "converged": false,
+    "min_normalized_residual": 2.549589345873535e-06,
+    "dt": 0.0016523122584545795,
+    "round_off_bound": 3.607347489580408e-05,
+    "seconds": 668.9336617169997,
+    "checks": [
+     {
+      "name": "Centreline u vs Ghia et al. (Re=1000)",
+      "value": 0.003997132573127504
+     },
+     {
+      "name": "Centreline v vs Ghia et al. (Re=1000)",
+      "value": 0.011519850478172722
+     },
+     {
+      "name": "Discrete continuity max|div u|",
+      "value": 6.377696990966797e-06
+     }
+    ]
+   },
+   "fp32_vs_fp64_max_rel": {
+    "x-velocity": 2.916129241164076e-05,
+    "y-velocity": 4.136034755818411e-05
+   }
+  },
+  {
+   "case": "natural_convection",
+   "params": {
+    "ra": 10000.0,
+    "n": 64
+   },
+   "steady_tol": 1e-06,
+   "fp64": {
+    "steps": 1910,
+    "converged": true,
+    "min_normalized_residual": 9.67620114606327e-07,
+    "dt": 0.00019590851765549435,
+    "round_off_bound": 1.8053757950173997e-05,
+    "seconds": 4.351188065000315,
+    "checks": [
+     {
+      "name": "Mean Nusselt vs de Vahl Davis (Ra=10000)",
+      "value": 2.251101907981979
+     },
+     {
+      "name": "Discrete continuity max|div u|",
+      "value": 2.1316282072803006e-13
+     }
+    ]
+   },
+   "fp32": {
+    "steps": 5730,
+    "converged": false,
+    "min_normalized_residual": 5.955351572056002e-06,
+    "dt": 0.00019590866353771168,
+    "round_off_bound": 1.8053744506550863e-05,
+    "seconds": 10.443347481999808,
+    "checks": [
+     {
+      "name": "Mean Nusselt vs de Vahl Davis (Ra=10000)",
+      "value": 2.251103639602661
+     },
+     {
+      "name": "Discrete continuity max|div u|",
+      "value": 0.0001220703125
+     }
+    ]
+   },
+   "fp32_vs_fp64_max_rel": {
+    "x-velocity": 1.2239635914283058e-06,
+    "y-velocity": 9.164247237120231e-07,
+    "temperature": 4.33483383311753e-07
+   }
+  },
+  {
+   "case": "natural_convection",
+   "params": {
+    "ra": 100000.0,
+    "n": 64
+   },
+   "steady_tol": 1e-06,
+   "fp64": {
+    "steps": 4700,
+    "converged": true,
+    "min_normalized_residual": 9.031421286501026e-07,
+    "dt": 6.251150185456504e-05,
+    "round_off_bound": 1.7892086988567998e-05,
+    "seconds": 11.227133551999941,
+    "checks": [
+     {
+      "name": "Mean Nusselt vs de Vahl Davis (Ra=100000)",
+      "value": 4.5686001744132545
+     },
+     {
+      "name": "Discrete continuity max|div u|",
+      "value": 7.993605777301127e-13
+     }
+    ]
+   },
+   "fp32": {
+    "steps": 14100,
+    "converged": false,
+    "min_normalized_residual": 3.6995680716867006e-06,
+    "dt": 6.251132322484901e-05,
+    "round_off_bound": 1.7892138116239803e-05,
+    "seconds": 26.255465146999995,
+    "checks": [
+     {
+      "name": "Mean Nusselt vs de Vahl Davis (Ra=100000)",
+      "value": 4.568596839904785
+     },
+     {
+      "name": "Discrete continuity max|div u|",
+      "value": 0.000408172607421875
+     }
+    ]
+   },
+   "fp32_vs_fp64_max_rel": {
+    "x-velocity": 6.829778621461816e-06,
+    "y-velocity": 2.632986185946676e-06,
+    "temperature": 3.0649115366619368e-06
+   }
+  }
+ ]
+}

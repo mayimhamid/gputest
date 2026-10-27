@@ -8,7 +8,9 @@
 * correctness: MAC and SIMPLEC solvers on CuPy vs NumPy (FP64), max difference
   after a fixed number of steps, and a short FP32 run;
 * speed: measured ms/step of the MAC solver per backend over a range of grid
-  sizes, and the planner's choice for each size.
+  sizes, every backend in FP64 and a GPU also in FP32 (listed separately: a
+  different accuracy, not a like-for-like speed-up), and the planner's choice
+  (backend and precision) for each size.
 
 Without a usable GPU the report says so and records only the CPU numbers;
 it never invents GPU results.
@@ -90,7 +92,7 @@ def speed(backends, sizes=(64, 128, 256, 512, 1024)) -> dict:
     from ..hardware.backend import get_backend
     from ..hardware.planner import plan_structured
     from ..structured.case import lid_driven_cavity
-    from ..structured.solver import MACSolver, resolve_dtype
+    from ..structured.solver import MACSolver
 
     table = {}
     for n in sizes:
@@ -99,7 +101,9 @@ def speed(backends, sizes=(64, 128, 256, 512, 1024)) -> dict:
             be = get_backend(name)
             c = lid_driven_cavity(re=1000, n=n)
             try:
-                s = MACSolver(c, backend=be, dtype=resolve_dtype(c, be))
+                # every backend in FP64, so the columns compare equal precision; a GPU is also timed
+                # in FP32 and reported separately (a different accuracy, not a like-for-like speed-up)
+                s = MACSolver(c, backend=be, dtype=np.float64)
                 steps = 20 if n <= 256 else (8 if n <= 512 else 4)
                 row[name] = {"ms_per_step": round(_time_steps(s, steps), 3), "precision": str(s.dtype),
                              "pressure": s.poisson_detail}
@@ -109,11 +113,16 @@ def speed(backends, sizes=(64, 128, 256, 512, 1024)) -> dict:
                     row[name]["kernels"] = "fused CUDA C++ (NVRTC)"
                 del s
                 be.free_pools()
+                if be.is_gpu:
+                    s = MACSolver(c, backend=be, dtype=np.float32)
+                    row[name]["ms_per_step_fp32"] = round(_time_steps(s, steps), 3)
+                    del s
+                    be.free_pools()
             except Exception as exc:
                 row[name] = {"error": f"{type(exc).__name__}: {exc}"}
         try:
             plan, _ = plan_structured(lid_driven_cavity(re=1000, n=n), autotune=True, keep_solver=False)
-            row["planner_choice"] = plan.backend
+            row["planner_choice"] = f"{plan.backend} ({str(plan.precision).replace('float', 'fp')})"
         except Exception as exc:
             row["planner_choice"] = f"error: {exc}"
         table[str(n)] = row
@@ -183,7 +192,10 @@ def render_markdown(data: dict) -> str:
         L += ["", "### GPU vs CPU correctness", "", "| Check | Value |", "|---|---|"]
         for k, v in data["correctness"].items():
             L.append(f"| {k} | {v:.3e} |")
-    L += ["", "### MAC solver, lid-driven cavity Re=1000: ms per time step", ""]
+    L += ["", "### MAC solver, lid-driven cavity Re=1000: ms per time step", "",
+          "Every backend in FP64. A GPU is also timed in FP32, listed after its FP64 time: that is a different "
+          "accuracy, not a like-for-like speed-up. The planner picks FP32 only for a case that passes the FP32 "
+          "accuracy test (`fp32_admissible`).", ""]
     names = data["backends"]
     L.append("| Grid | " + " | ".join(names) + " | Planner choice |")
     L.append("|---" * (len(names) + 2) + "|")
@@ -195,6 +207,8 @@ def render_markdown(data: dict) -> str:
                    else r.get("error", "-"))
             if "ms_per_step_vectorised" in r:
                 txt += f"; vectorised {r['ms_per_step_vectorised']}"
+            if "ms_per_step_fp32" in r:
+                txt += f"; FP32 {r['ms_per_step_fp32']}"
             cells.append(txt)
         L.append(f"| {n}² | " + " | ".join(cells) + f" | {row.get('planner_choice')} |")
     L.append("")

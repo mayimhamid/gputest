@@ -1,0 +1,110 @@
+{
+ "meta": {
+  "date": "2026-10-26T21:35:33",
+  "flowtrace": "0.3.0",
+  "python": "3.13.17",
+  "cpu": "Intel(R) Xeon(R) Processor @ 2.80GHz"
+ },
+ "rows": [
+  {
+   "solver": "SIMPLEC",
+   "case": "2-D, 4,096 cells, laminar",
+   "peak_MB": 13.19926,
+   "estimate_MB": 19.417288,
+   "rss_MB": 9.261056,
+   "estimate_over_peak": 1.4710891368152457,
+   "upper_bound": true,
+   "estimate_over_rss": 2.0966602512715613
+  },
+  {
+   "solver": "SIMPLEC",
+   "case": "2-D, 16,384 cells, laminar",
+   "peak_MB": 30.730791,
+   "estimate_MB": 47.48774,
+   "rss_MB": 30.834688,
+   "estimate_over_peak": 1.545282059287052,
+   "upper_bound": true,
+   "estimate_over_rss": 1.5400752555044501
+  },
+  {
+   "solver": "SIMPLEC",
+   "case": "2-D, 65,536 cells, laminar",
+   "peak_MB": 121.846082,
+   "estimate_MB": 159.588192,
+   "rss_MB": 130.080768,
+   "estimate_over_peak": 1.3097523480484172,
+   "upper_bound": true,
+   "estimate_over_rss": 1.2268392511335726
+  },
+  {
+   "solver": "SIMPLEC",
+   "case": "2-D, 16,384 cells, laminar, energy",
+   "peak_MB": 31.142705,
+   "estimate_MB": 48.618236,
+   "rss_MB": 32.841728,
+   "estimate_over_peak": 1.5611436450366147,
+   "upper_bound": true,
+   "estimate_over_rss": 1.4803799605185208
+  },
+  {
+   "solver": "SIMPLEC",
+   "case": "2-D, 16,384 cells, k-omega-sst",
+   "peak_MB": 33.939461,
+   "estimate_MB": 47.48774,
+   "rss_MB": 34.193408,
+   "estimate_over_peak": 1.399189574637028,
+   "upper_bound": true,
+   "estimate_over_rss": 1.388798098159739
+  },
+  {
+   "solver": "SIMPLEC",
+   "case": "3-D, 32,768 cells, laminar",
+   "peak_MB": 94.177719,
+   "estimate_MB": 125.287062,
+   "rss_MB": 79.781888,
+   "estimate_over_peak": 1.330325934099126,
+   "upper_bound": true,
+   "estimate_over_rss": 1.5703697310346931
+  },
+  {
+   "solver": "MAC",
+   "case": "cavity 128x128",
+   "peak_MB": 4.021943,
+   "estimate_MB": 6.75659,
+   "estimate_over_peak": 1.6799318140510693,
+   "upper_bound": true
+  },
+  {
+   "solver": "MAC",
+   "case": "cavity 256x256",
+   "peak_MB": 15.98224,
+   "estimate_MB": 26.94731,
+   "estimate_over_peak": 1.686078422048474,
+   "upper_bound": true
+  },
+  {
+   "solver": "MAC",
+   "case": "cavity 512x512",
+   "peak_MB": 63.800499,
+   "estimate_MB": 107.63339,
+   "estimate_over_peak": 1.6870305356075663,
+   "upper_bound": true
+  },
+  {
+   "solver": "MAC",
+   "case": "natural_convection 256x256",
+   "peak_MB": 20.197753,
+   "estimate_MB": 32.21604,
+   "estimate_over_peak": 1.5950308927928767,
+   "upper_bound": true
+  },
+  {
+   "solver": "MAC",
+   "case": "cylinder 256x128",
+   "peak_MB": 11.208896,
+   "estimate_MB": 19.848582,
+   "estimate_over_peak": 1.7707883095712549,
+   "upper_bound": true
+  }
+ ]
+}

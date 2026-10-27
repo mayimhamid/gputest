@@ -112,6 +112,7 @@ class Job:
         self.kind = spec.get("kind", "structured")
         self.status = "created"
         self.error = None
+        self.exception: Optional[BaseException] = None
         self.solver = None
         self.plan = None
         self.result = {}
@@ -158,7 +159,12 @@ class Job:
                 self._run_unstructured()
         except Exception as exc:
             self.error = f"{type(exc).__name__}: {exc}"
-            self.log(traceback.format_exc(), "error")
+            self.exception = exc
+            # what the user asked for (a file, zone, backend, memory) or a diverged run: one line;
+            # anything else is a fault and keeps its traceback (FLOWTRACE_DEBUG=1: always)
+            expected = is_input_error(exc) or isinstance(exc, FloatingPointError)
+            self.log(self.error if expected and not os.environ.get("FLOWTRACE_DEBUG") else traceback.format_exc(),
+                     "error")
             self.set_status("error", error=self.error)
         finally:
             self.finished_at = time.time()
@@ -259,6 +265,9 @@ class Job:
     def _loop(self, solver, label: str, publish_frames: bool = True):
         c = solver.case
         mon = max(1, int(getattr(c, "monitor_interval", 10) or 10))
+        # algebraic/conservation diagnostics (unstructured solvers): a multiple of the monitor
+        # interval, at least every 10 iterations, and always at the end
+        diag_every = mon * max(1, -(-10 // mon)) if hasattr(solver, "diagnostics") else 0
         ckpt_every = float(self.spec.get("checkpoint_seconds", 0) or 0)
         writer = CheckpointWriter(os.path.join(self.workdir, "checkpoints", self.id)) if ckpt_every > 0 else None
         last_frame = 0.0
@@ -290,10 +299,18 @@ class Job:
                         self.probe_log["v"].append(pv[1])
                 if hasattr(solver, "last_linear"):
                     ev["linear"] = solver.last_linear
+                if diag_every and (k % diag_every == 0 or solver.finished):
+                    from ..unstructured.diagnostics import summary
+
+                    try:
+                        ev["diagnostics"] = summary(solver.diagnostics())
+                    except Exception as exc:  # monitoring must never stop a run
+                        self.log(f"diagnostics disabled for this run: {exc}", "warn")
+                        diag_every = 0
                 ev["timers"] = dict(solver.timers)
                 self.hub.publish(_jsonable(ev))
                 if not all(np.isfinite(v) for v in r["raw"].values()):
-                    raise FloatingPointError("solution diverged (non-finite residuals)")
+                    raise FloatingPointError("solution diverged (non-finite residuals)" + divergence_context(solver))
             now = time.time()
             if publish_frames and now - last_frame >= self.frame_interval:
                 self._publish_frame(solver)
@@ -366,6 +383,9 @@ class Job:
             cd = dict(self.spec.get("case") or {})
             bnd = default_boundaries(mesh)
             for k, v in (cd.pop("boundaries", None) or {}).items():
+                if k not in bnd:  # a misspelt zone would otherwise be ignored without a word
+                    raise ValueError(f"boundary condition given for {k!r}, which is not a boundary zone of this mesh "
+                                     f"(zones: {', '.join(sorted(bnd))})")
                 bnd[k] = v
             ucase = UnstructuredCase(boundaries=bnd, **cd)
             if not ucase.periodic:
@@ -387,6 +407,17 @@ class Job:
             apply_initial_condition(solver, info)
         self.solver = solver
         desc = solver.describe()
+        from ..unstructured.diagnostics import pressure_matrix_properties
+
+        pm = pressure_matrix_properties(getattr(solver, "flow", solver))  # None if no iteration was timed
+        if pm is None:
+            p_reason = "AMG makes the elliptic solve mesh-size independent (CG conditions checked after the run)"
+        elif pm["cg_applicable"]:
+            p_reason = ("CG applies: the assembled matrix is symmetric, weakly diagonally dominant with non-positive "
+                        "off-diagonals (positive semi-definite); AMG makes the solve mesh-size independent")
+        else:
+            p_reason = f"WARNING: CG conditions not met by the assembled matrix: {pm}"
+            self.log(p_reason, "warn")
         plan = {
             "backend": be.name, "device": be.device, "precision": desc["precision"],
             "pressure": desc["pressure_solver"], "diffusion": "implicit",
@@ -397,7 +428,7 @@ class Job:
                 {"stage": "Gradients, assembly, momentum", "device": be.device.upper(),
                  "method": "least-squares gradients, CSR assembly, Jacobi-BiCGSTAB", "reason": uplan.reason},
                 {"stage": "Pressure correction", "device": be.device.upper(), "method": desc["pressure_solver"],
-                 "reason": "AMG makes the elliptic solve mesh-size independent"},
+                 "reason": p_reason},
                 {"stage": "AMG hierarchy setup", "device": "CPU", "method": "smoothed aggregation, rebuilt every 10 its",
                  "reason": "irregular graph work stays on the host"},
             ],
@@ -417,12 +448,19 @@ class Job:
         try:
             res["wall_report"] = flow.wall_report()
             res["periodic_mass_flow"] = flow.periodic_mass_flow()
-            # local continuity: the net mass balance of a closed domain is zero by construction
+            # local continuity: the net mass balance of a closed domain is zero by construction.
+            # max_i |m_i| / (sum_f |F_f| / n_cells), on the final corrected fluxes
             imb = flow.be.to_numpy(flow.fv.net_outflow(flow.F, flow.Fb))
             scale = float(np.abs(flow.be.to_numpy(flow.F)).sum() + np.abs(flow.be.to_numpy(flow.Fb)).sum())
             res["continuity_local_max"] = float(np.abs(imb).max() / max(scale, 1e-300) * imb.size)
         except Exception as exc:  # reports must never fail a finished run
             self.log(f"reports skipped: {exc}", "warn")
+        try:
+            res["diagnostics"] = solver.diagnostics()
+            res["pressure_matrix"] = pressure_matrix_properties(flow)
+            self.log(_diagnostics_line(res["diagnostics"]))
+        except Exception as exc:  # diagnostics must never fail a finished run
+            self.log(f"diagnostics skipped: {exc}", "warn")
         if ucase.unsteady:
             res["time"] = flow.time
         try:
@@ -445,7 +483,8 @@ class Job:
         for k, v in (res.get("periodic_mass_flow") or {}).items():
             self.log(f"[report] periodic mass flow {k}: {v:.6g}")
         if "continuity_local_max" in res:
-            self.log(f"[report] local continuity: max cell imbalance / mean face flux {res['continuity_local_max']:.3e}")
+            self.log("[report] local continuity: max cell imbalance / (sum of |face mass fluxes| per cell) "
+                     f"{res['continuity_local_max']:.3e}")
         for ev in res["stability_rollbacks"]:
             self.log(f"Stability guard: diverging at iteration {ev['detected_at']}, continuing from the state of iteration "
                      f"{ev['restored_to']} with pressure relaxation {ev['relax_p']}", "warn")
@@ -527,6 +566,64 @@ class Job:
                 + "\n".join(f"  {k}: {v}" for k, v in bnd.items()) + "\n")
         files["readme"] = readme
         return files
+
+
+def is_input_error(exc: BaseException) -> bool:
+    """An error in what the user asked for (missing or unreadable file, malformed mesh, unknown
+    zone, unavailable backend, not enough memory), reported in one line rather than as a fault."""
+    from ..hardware.backend import BackendUnavailable
+
+    return isinstance(exc, (OSError, ValueError, MemoryError, BackendUnavailable))
+
+
+def divergence_context(solver) -> str:
+    """What a diverged pressure-based run tells about its likely cause (empty for other solvers)."""
+    import math
+
+    flow = getattr(solver, "flow", solver)
+    if not hasattr(flow, "guard_events") or not hasattr(flow, "fv"):
+        return ""
+    theta = float(flow.fv.non_orthogonality_deg)
+    limit = math.cos(math.radians(theta)) ** 2
+    parts = [f" at iteration {flow.iteration}; maximum mesh non-orthogonality {theta:.1f} deg"]
+    if not flow.guard_enabled:
+        parts.append(f"; relax_p = {flow.relax_p:g} was set explicitly, so the stability guard was off")
+    elif flow.guard_exhausted_at is not None:
+        parts.append(f"; the stability guard lowered relax_p to {flow.relax_p:.3g} in {len(flow.guard_events)} "
+                     f"rollback(s) and could not go lower (floor {flow.GUARD_MIN_RELAX:g})")
+    if theta > 5.0:
+        parts.append(f". On uniformly skewed quads SIMPLE/SIMPLEC was measured stable for relax_p below about "
+                     f"cos^2(non-orthogonality) = {limit:.2f} (docs/theory/simplec.md, skewed meshes); "
+                     "reduce the skew of the mesh, or leave relax_p automatic")
+    return "".join(parts)
+
+
+def _fmt_metric(v) -> str:
+    if v is None:
+        return "n/a"
+    if isinstance(v, float) and not np.isfinite(v):
+        return "non-finite"
+    return f"{v:.2e}"
+
+
+def _diagnostics_line(d: dict) -> str:
+    """One log line with the headline numbers of SimpleSolver.diagnostics()."""
+    from ..unstructured.diagnostics import summary
+
+    s = summary(d)
+    if not s:
+        return "[diagnostics] not available: " + str(d.get("reason", "no completed iteration"))
+    line = (f"[diagnostics] iteration {s['iteration']}: momentum row-scaled residual pre-solve "
+            f"{_fmt_metric(s['momentum_pre_row_scaled'])}, after the linear solve "
+            f"{_fmt_metric(s['momentum_solve_row_scaled'])}; local continuity predictor "
+            f"{_fmt_metric(s['continuity_predictor_local_max'])}, corrected "
+            f"{_fmt_metric(s['continuity_corrected_local_max'])}; global boundary imbalance "
+            f"{_fmt_metric(s['continuity_global_relative'])}; change per iteration u "
+            f"{_fmt_metric(s['velocity_change'])}, p {_fmt_metric(s['pressure_change'])}; "
+            + ("all values finite" if s["finite"] else "NON-FINITE VALUES PRESENT"))
+    if d.get("rolled_back"):
+        line += " (this iteration was rolled back by the stability guard)"
+    return line
 
 
 def _jsonable(o):

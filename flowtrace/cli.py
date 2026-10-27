@@ -100,7 +100,7 @@ def cmd_run(args):
             continue
         t = ev.get("type")
         if t == "log":
-            print(ev["msg"])
+            _print_log(ev, args)
         elif t == "residuals" and time.time() - last > 1.0:
             last = time.time()
             res = "  ".join(f"{k}={v:.2e}" for k, v in ev["scaled"].items())
@@ -109,7 +109,7 @@ def cmd_run(args):
             print(f"status: {ev['status']}")
     job.join()
     if job.error:
-        sys.exit(1)
+        _job_failed(job)
     if args.export:
         files = job.export_package(args.export)
         print("Fluent package:")
@@ -312,7 +312,7 @@ def cmd_case(args):
         except Exception:
             continue
         if ev.get("type") == "log":
-            print(ev["msg"])
+            _print_log(ev, args)
         elif ev.get("type") == "residuals" and time.time() - last > 1.0:
             last = time.time()
             print(f"it {ev['step']:>6}  " + "  ".join(f"{k}={v:.2e}" for k, v in ev["scaled"].items()))
@@ -320,7 +320,7 @@ def cmd_case(args):
             print(f"status: {ev['status']}")
     job.join()
     if job.error:
-        sys.exit(1)
+        _job_failed(job)
     if args.export:
         for k, v in job.export_package(args.export).items():
             print(f"  {k:<6} {v}")
@@ -331,10 +331,16 @@ def cmd_solve(args):
 
     from .mesh.fluent_h5 import read_any_mesh
     from .runtime.engine import EventHub, Job
+    from .unstructured.case import default_boundaries
 
     mesh, _ = read_any_mesh(args.path)
     _apply_mesh_options(mesh, args)
     case = asdict(_case_from_args(args, os.path.basename(args.path)))
+    zones = default_boundaries(mesh)
+    unknown = sorted(set(case.get("boundaries") or {}) - set(zones))
+    if unknown:  # an input error: report it before the run starts (the job would also refuse it)
+        raise ValueError(f"--bc names {', '.join(map(repr, unknown))}, not a boundary zone of {args.path} "
+                         f"(zones: {', '.join(sorted(zones))})")
     hub = EventHub()
     q = hub.subscribe()
     job = Job({"kind": "unstructured", "mesh_id": "m", "case": case}, hub, args.workdir, meshes={"m": mesh})
@@ -346,7 +352,7 @@ def cmd_solve(args):
         except Exception:
             continue
         if ev.get("type") == "log":
-            print(ev["msg"])
+            _print_log(ev, args)
         elif ev.get("type") == "residuals" and time.time() - last > 1.0:
             last = time.time()
             print(f"it {ev['step']:>6}  " + "  ".join(f"{k}={v:.2e}" for k, v in ev["scaled"].items()))
@@ -354,7 +360,7 @@ def cmd_solve(args):
             print(f"status: {ev['status']}")
     job.join()
     if job.error:
-        sys.exit(1)
+        _job_failed(job)
     if args.export:
         for k, v in job.export_package(args.export).items():
             print(f"  {k:<6} {v}")
@@ -448,8 +454,14 @@ def cmd_gpu_report(args):
 
 
 def cmd_ui(args):
-    from .ui.server import serve
+    from .ui.server import LOOPBACK, serve
 
+    if args.host not in LOOPBACK:
+        if not args.allow_remote:
+            raise ValueError(f"--host {args.host} would expose the dashboard, which has no authentication, to the "
+                             "network; add --allow-remote only on a network you trust")
+        print(f"WARNING: serving the unauthenticated dashboard on {args.host}: anyone who can reach this port can "
+              "start runs and read results.", file=sys.stderr)
     serve(args.host, args.port, args.workdir, open_browser=not args.no_browser)
 
 
@@ -472,6 +484,8 @@ def main(argv=None):
     p.add_argument("--host", default="127.0.0.1")
     p.add_argument("--port", type=int, default=8765)
     p.add_argument("--no-browser", action="store_true")
+    p.add_argument("--allow-remote", action="store_true",
+                   help="allow a non-loopback --host (the dashboard has no authentication)")
     p.set_defaults(func=cmd_ui)
     sub.add_parser("probe", help="describe this machine").set_defaults(func=cmd_probe)
     sub.add_parser("bench", help="micro-benchmark the backends").set_defaults(func=cmd_bench)
@@ -595,7 +609,38 @@ def main(argv=None):
     args = ap.parse_args(argv)
     if not getattr(args, "func", None):
         args = ap.parse_args(["ui"] + (argv or []))
-    args.func(args)
+    try:
+        args.func(args)
+    except KeyboardInterrupt:
+        print("flowtrace: interrupted", file=sys.stderr)
+        sys.exit(130)
+    except Exception as exc:
+        # unreadable or missing input, invalid parameters, a case that does not fit, a missing
+        # backend: one line on stderr and exit status 2 (FLOWTRACE_DEBUG=1 shows the traceback)
+        if not _user_error(exc) or os.environ.get("FLOWTRACE_DEBUG"):
+            raise
+        print(f"flowtrace {args.cmd or 'ui'}: error: {exc}", file=sys.stderr)
+        sys.exit(2)
+
+
+def _user_error(exc: BaseException) -> bool:
+    from .runtime.engine import is_input_error
+
+    return is_input_error(exc)
+
+
+def _print_log(ev: dict, args) -> None:
+    """A job's log line: errors on stderr in the CLI's error format, everything else on stdout."""
+    if ev.get("level") == "error":
+        print(f"flowtrace {args.cmd}: error: {ev['msg']}", file=sys.stderr)
+    else:
+        print(ev["msg"])
+
+
+def _job_failed(job) -> None:
+    """Exit status of a failed job: 2 for an input error (already printed in one line), 1 otherwise."""
+    exc = getattr(job, "exception", None)
+    sys.exit(2 if exc is not None and _user_error(exc) else 1)
 
 
 if __name__ == "__main__":

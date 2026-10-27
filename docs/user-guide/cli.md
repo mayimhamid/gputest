@@ -1,7 +1,22 @@
 # Command line
 
 `flowtrace <command> --help` lists every option. Running `flowtrace` with no command starts the
-dashboard.
+dashboard (`flowtrace ui`, local only; see [Dashboard](dashboard.md#security) for `--host` and
+`--allow-remote`).
+
+## Exit status and errors
+
+| Status | Meaning |
+|---:|---|
+| 0 | success |
+| 1 | the run failed (for example it diverged: the error line gives the iteration, the mesh's non-orthogonality and the stability guard's state), or a result fails its check (`benchmark`, `validate`, a failed case in `batch`) |
+| 2 | usage or input error: bad option, missing or unreadable file, malformed mesh, unknown zone name, backend not available, not enough memory. `flowtrace quality` also returns 2 when a quality metric is below Fluent's limits |
+| 130 | interrupted (Ctrl-C) |
+
+Input errors and diverged runs print one line, `flowtrace <command>: error: <cause>`, instead of
+a Python traceback. That applies whether the error is found before the run starts or by the
+solver. An unexpected fault keeps its traceback. Set `FLOWTRACE_DEBUG=1` to see the traceback
+in every case (for a bug report).
 
 ## Inspecting the machine and meshes
 

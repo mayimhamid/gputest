@@ -78,3 +78,49 @@ def test_batch_runs_density_based_jobs(tmp_path):
     assert r["converged"]
     assert abs(r["mass_balance"]["left"] + r["mass_balance"]["right"]) < 1e-6 * abs(r["mass_balance"]["right"])
     assert os.path.exists(r["ip"])
+
+
+def test_checkpoint_on_disk_restart_reaches_the_same_answer(tmp_path):
+    """State written by the asynchronous CheckpointWriter, read back with load_checkpoint and
+    loaded into a fresh solver, continues to the answer of the uninterrupted run."""
+    from flowtrace.runtime.checkpoint import CheckpointWriter, load_checkpoint
+    from flowtrace.structured.case import natural_convection
+    from flowtrace.structured.solver import MACSolver
+
+    m = cartesian_mesh_2d(16, 8, 3.0, 1.0, names=("in", "out", "bottom", "top"))
+    case = UnstructuredCase(boundaries={"in": BoundarySpec("inlet", velocity=[1.0, 0.0]), "out": BoundarySpec("outlet"),
+                                        "bottom": BoundarySpec("wall"), "top": BoundarySpec("wall")},
+                            viscosity=1e-3, turbulence="k-omega-sst", max_iter=3000, tol=1e-8, backend="numpy")
+    ref = SimpleSolver(m, case)
+    while not ref.finished:
+        ref.step()
+    a = SimpleSolver(m, case)
+    for _ in range(40):
+        a.step()
+    w = CheckpointWriter(str(tmp_path / "ckpt"))
+    w.submit("step40", a.state_dict(), {"label": "SIMPLE"})
+    w.close()
+    st, meta = load_checkpoint(str(tmp_path / "ckpt" / "step40.npz"))
+    assert meta["label"] == "SIMPLE" and int(st["iteration"]) == 40
+    b = SimpleSolver(m, case)
+    b.load_state(st)
+    while not b.finished:
+        b.step()
+    assert ref.converged and b.converged
+    for k in ("x-velocity", "pressure", "turb-kinetic-energy"):
+        x, y = ref.fields()[k], b.fields()[k]
+        assert np.abs(x - y).max() <= 1e-5 * max(np.abs(x).max(), 1e-12), k
+
+    c = natural_convection(ra=1e4, n=24, max_steps=40)
+    s = MACSolver(c, backend=get_backend("numpy"))
+    for _ in range(20):
+        s.step()
+    w = CheckpointWriter(str(tmp_path / "mac"))
+    w.submit("s20", s.state_dict(), {})
+    w.close()
+    r = MACSolver(c, backend=get_backend("numpy"))
+    r.load_state(load_checkpoint(str(tmp_path / "mac" / "s20.npz"))[0])
+    for _ in range(5):
+        s.step()
+        r.step()
+    assert np.abs(s.U - r.U).max() < 1e-12 and np.abs(s.T - r.T).max() < 1e-12

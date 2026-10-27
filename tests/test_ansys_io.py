@@ -166,9 +166,48 @@ def test_fluent_warmstart_h5_input_writes_dat_h5(tmp_path):
     assert "kw-sst" in (out / "warmstart.jou").read_text()
 
 
-def test_fluent_warmstart_rejects_unknown_zone(tmp_path):
+def test_fluent_warmstart_rejects_unknown_zone(tmp_path, capsys, monkeypatch):
     from flowtrace.cli import main
 
+    args = ["fluent-warmstart", os.path.join(EXAMPLES, "cavity_quad.msh"), "--bc", "nonexistent=wall:1,0",
+            "--max-iter", "2", "--out", str(tmp_path / "x"), "--backend", "numpy"]
+    with pytest.raises(SystemExit) as exc:  # the CLI reports user errors in one line, exit status 2
+        main(args)
+    assert exc.value.code == 2 and "'nonexistent', which is not a boundary zone" in capsys.readouterr().err
+    monkeypatch.setenv("FLOWTRACE_DEBUG", "1")  # ... and re-raises them for debugging
     with pytest.raises(ValueError):
-        main(["fluent-warmstart", os.path.join(EXAMPLES, "cavity_quad.msh"), "--bc", "nonexistent=wall:1,0",
-              "--max-iter", "2", "--out", str(tmp_path / "x"), "--backend", "numpy"])
+        main(args)
+
+
+def test_solve_rejects_unknown_zone_before_running(tmp_path, capsys):
+    from flowtrace.cli import main
+
+    args = ["solve", os.path.join(EXAMPLES, "cavity_quad.msh"), "--bc", "nonexistent=wall:1,0",
+            "--max-iter", "2", "--workdir", str(tmp_path)]
+    with pytest.raises(SystemExit) as exc:
+        main(args)
+    err = capsys.readouterr()
+    assert exc.value.code == 2 and "'nonexistent', not a boundary zone" in err.err and "lid" in err.err
+    assert "Traceback" not in err.out + err.err and not (tmp_path / "checkpoints").exists()
+
+
+def test_skewness_is_not_applied_to_polyhedral_cells():
+    """Equiangle skewness is an element-type metric: polyhedral cells (Fluent Meshing poly meshes)
+    are judged by orthogonal quality, and standard cells keep their skewness."""
+    import numpy as np
+
+    from flowtrace.mesh.quality import mesh_quality
+    from flowtrace.mesh.unstructured import agglomerate_cells, cartesian_mesh_2d, extrude_to_3d
+
+    m3 = extrude_to_3d(cartesian_mesh_2d(4, 4, warp=0.05), 2, 0.5)
+    c = np.arange(m3.n_cells)
+    c2, k = c % 16, c // 16
+    i, j = c2 // 4, c2 % 4
+    group = np.where(i < 2, ((i // 2) * 2 + j // 2) * 2 + k // 2, 1000 + c)  # left half: 2x2x2 polyhedra
+    poly = agglomerate_cells(m3, group)
+    q = mesh_quality(poly)
+    n_poly = int((np.bincount(poly.owner, minlength=poly.n_cells)
+                  + np.bincount(poly.neighbour[poly.neighbour >= 0], minlength=poly.n_cells) > 6).sum())
+    assert n_poly == 2 and q.skewness_not_applicable_cells == n_poly
+    assert 0.0 < q.max_skewness <= mesh_quality(m3).max_skewness  # the remaining (warped) hexes keep theirs
+    assert any("not evaluated" in w for w in q.warnings) and q.ok

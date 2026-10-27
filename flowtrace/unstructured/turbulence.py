@@ -48,7 +48,11 @@ from typing import Dict, Optional
 
 import numpy as np
 
-KAPPA = 0.41
+KAPPA = 0.41  # von Karman constant of the SST model (Menter) and of Spalding's law (with B = 5.2)
+# Fluent's standard / scalable wall functions pair E = 9.793 with kappa = 0.4187 (log-law intercept
+# B = ln(E)/kappa = 5.45). Combined with 0.41, E = 9.793 gives B = 5.57 and under-predicts the wall
+# shear (measured: flat plate Cf -2 %, channel U+ up to +1.7 % against DNS).
+KAPPA_WALL = 0.4187
 E_WALL = 9.793
 B_SPALDING = 5.2
 CMU = 0.09
@@ -479,7 +483,7 @@ class KEpsilonRealizable(TurbulenceModel):
     def wall_shear_viscosity(self, U):
         us = self._ustar()
         ystar = np.maximum(self.rho * us * self.yb / self.mu, YSTAR_LIM)
-        mu_w = self.rho * KAPPA * us * self.yb / np.log(E_WALL * ystar)
+        mu_w = self.rho * KAPPA_WALL * us * self.yb / np.log(E_WALL * ystar)
         mu_w = np.maximum(mu_w, self.mu)
         self.yplus = np.where(self.wall_b, self.rho * us * self.yb / self.mu, 0.0)
         return np.where(self.wall_b, mu_w, self.mu)
@@ -498,14 +502,14 @@ class KEpsilonRealizable(TurbulenceModel):
             area = h(s.fv.Sb_mag).astype(np.float64)
             wf, wc = self.wall_faces, self.wall_cells
             # G_k = tau_w dU/dy|_P = tau_w^2 / (kappa rho u* y_P), area-averaged over the cell's wall faces
-            prod = tau * tau / (KAPPA * rho * np.maximum(us, 1e-300) * np.maximum(self.yb, 1e-300))
+            prod = tau * tau / (KAPPA_WALL * rho * np.maximum(us, 1e-300) * np.maximum(self.yb, 1e-300))
             num = np.bincount(Pb[wf], (prod * area)[wf], minlength=s.nc)
             den = np.bincount(Pb[wf], area[wf], minlength=s.nc)
             Gk_h = h(Gk).astype(np.float64)
             Gk_h[wc] = num[wc] / np.maximum(den[wc], 1e-300)
             Gk = xp.asarray(Gk_h, dtype=s.dtype)
             kc = h(k).astype(np.float64)[wc]
-            eps_w = CMU ** 0.75 * np.maximum(kc, 0.0) ** 1.5 / (KAPPA * self.y_wall_cell[wc])
+            eps_w = CMU ** 0.75 * np.maximum(kc, 0.0) ** 1.5 / (KAPPA_WALL * self.y_wall_cell[wc])
         else:
             eps_w = np.zeros(0)
         knew, rk = self._transport(k, self.kb_in, 1.0 / self.sk, Gk, rho * eps / k, self.relax_k, floor=self.k_min, name="k")

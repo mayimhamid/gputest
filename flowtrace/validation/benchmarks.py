@@ -789,6 +789,9 @@ def b_warmstart(ctx):
             p["speedup"], None, "x", "> 1", p["speedup"] > 1, f"field within {FIELD_TOL:g} of the converged solution")
         r.metrics[f"{p['case']}: warm run reaches the cold-start solution"] = _m(
             p["max_velocity_difference"], 0.0, "", f"<= {FIELD_TOL:g}", p["warm_converged"])
+        if p.get("wallclock_ratio") is not None:  # measured and reported; no claim, so no criterion
+            r.metrics[f"{p['case']}: wall time, cold / (pre-solve + interpolation + warm)"] = _m(
+                p["wallclock_ratio"], None, "x", None, None, "solver steps only, same field tolerance")
     r.details = data
     return r
 

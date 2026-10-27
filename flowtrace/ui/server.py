@@ -99,12 +99,49 @@ def unstructured_preset_catalog():
     return out
 
 
+LOOPBACK = ("127.0.0.1", "::1", "localhost")
+
+
+def _hostname(host_header: str) -> str:
+    h = host_header.strip().lower()
+    if h.startswith("["):  # [::1]:8765
+        return h[1:h.find("]")] if "]" in h else h
+    return h.rsplit(":", 1)[0] if h.count(":") == 1 else h
+
+
+def request_allowed(bound_host: str, host_header: str, origin) -> bool:
+    """The dashboard has no authentication, so it only answers its own pages.
+
+    * bound to a loopback address (the default), the Host header must name a loopback host:
+      a foreign name that resolves to 127.0.0.1 is DNS rebinding;
+    * a browser request from another origin (Origin header present and different from Host)
+      is a cross-site request, e.g. a web page posting a job; requests without an Origin header
+      (curl, scripts, the tests) are not browser cross-site requests.
+    """
+    host = (host_header or "").strip().lower()
+    if bound_host in LOOPBACK and _hostname(host) not in LOOPBACK:
+        return False
+    if origin is not None:
+        o = urlparse(origin.strip().lower())
+        if origin.strip().lower() == "null" or o.netloc != host:
+            return False
+    return True
+
+
 def make_handler(app: AppState):
     class Handler(BaseHTTPRequestHandler):
         server_version = "FlowTrace"
 
         def log_message(self, fmt, *args):  # keep the console quiet
             pass
+
+        def _refuse_foreign(self) -> bool:
+            """True (after answering 403) for DNS-rebinding and cross-site requests."""
+            if request_allowed(str(self.server.server_address[0]), self.headers.get("Host", ""),
+                               self.headers.get("Origin")):
+                return False
+            self._error("forbidden: the FlowTrace dashboard only answers its own pages", 403)
+            return True
 
         # ---------------- helpers ----------------
         def _json(self, obj, status=200):
@@ -140,13 +177,15 @@ def make_handler(app: AppState):
 
         # ---------------- routing ----------------
         def do_GET(self):
+            if self._refuse_foreign():
+                return
             path = urlparse(self.path).path
             try:
                 if path in ("/", "/index.html"):
                     return self._file(os.path.join(STATIC, "index.html"), ctype="text/html; charset=utf-8")
                 if path.startswith("/static/"):
                     fp = os.path.normpath(os.path.join(STATIC, path[len("/static/"):]))
-                    if not fp.startswith(STATIC) or not os.path.isfile(fp):
+                    if os.path.commonpath([fp, STATIC]) != STATIC or not os.path.isfile(fp):  # stays inside static/
                         return self._error("not found", 404)
                     return self._file(fp)
                 if path == "/api/system":
@@ -181,6 +220,8 @@ def make_handler(app: AppState):
                 self._error(f"{type(exc).__name__}: {exc}", 500)
 
         def do_POST(self):
+            if self._refuse_foreign():
+                return
             path = urlparse(self.path).path
             try:
                 if path == "/api/run":
@@ -297,7 +338,7 @@ def make_handler(app: AppState):
                 for name in available_backends():
                     be = get_backend(name)
                     free, _ = be.mem_info()
-                    item = 4 if (case.precision == "fp32" or (be.is_gpu and case.precision == "auto")) else 8
+                    item = 4 if case.precision == "fp32" else 8  # "auto" is FP64 unless the planner admits FP32
                     out[name] = estimate_structured(case.nx, case.ny, case.energy, item,
                                                     "mg" if case.obstacles else "fft", True,
                                                     bool(case.obstacles), be.device, free).to_dict()
@@ -506,6 +547,48 @@ def _svg_residuals(history: list, width: int = 640, height: int = 260) -> str:
     return "".join(out)
 
 
+def _diagnostics_table(d: dict, esc) -> str:
+    """Rows of SimpleSolver.diagnostics() for the run report (null = undefined or non-finite)."""
+    def f(v):
+        return "n/a" if v is None else (f"{v:.3e}" if isinstance(v, float) else str(v))
+
+    from ..unstructured.diagnostics import COMPONENTS
+
+    rows = []
+    for comp in COMPONENTS:
+        m = d.get("momentum", {}).get(comp)
+        if m is not None:
+            pre, sol = m["pre_solve"], m["solve"]
+            lin = sol.get("linear_solver") or {}
+            rows.append((f"{comp}: row-scaled residual, assembled system at the old field (pre-solve)", f(pre["row_scaled"])))
+            rows.append((f"{comp}: row-scaled residual, relaxed system at the solution (after solve)", f(sol["row_scaled"])))
+            rows.append((f"{comp}: linear solve, true / reported residual reduction",
+                         f"{f(sol.get('true_reduction_l2'))} / {f(lin.get('reported_residual'))} in {lin.get('iterations')} it"))
+    if "energy" in d:
+        rows.append(("energy: row-scaled residual pre-solve / after solve",
+                     f"{f(d['energy']['pre_solve']['row_scaled'])} / {f(d['energy']['solve']['row_scaled'])}"))
+    pc = d.get("pressure_correction", {})
+    rows.append(("pressure correction: relative residual (true / reported)",
+                 f"{f(pc.get('relative_l2'))} / {f((pc.get('linear_solver') or {}).get('reported_residual'))}"))
+    c = d.get("continuity", {})
+    for tag in ("predictor", "corrected"):
+        if tag in c:
+            rows.append((f"local continuity, {tag} fluxes: max |m_i| / sum_f |F_f|", f(c[tag]["local_max_relative"])))
+    g = c.get("global_boundary", {})
+    rows.append(("global boundary imbalance: signed sum (kg/s) / relative to throughflow",
+                 f"{f(g.get('signed'))} / {f(g.get('relative'))}"))
+    ch = d.get("field_change", {})
+    rows.append(("field change per iteration: velocity / pressure", f"{f(ch.get('velocity'))} / {f(ch.get('pressure'))}"))
+    h = d.get("health", {})
+    rows.append(("all values finite", "yes" if h.get("finite") else f"no: {h.get('nonfinite_values')}"))
+    if d.get("rolled_back"):
+        rows.append(("note", "this iteration was rolled back by the stability guard"))
+    return ("<p class='m'>Iteration " + esc(d.get("iteration")) + ", " + esc(d.get("precision")) + ". Definitions: "
+            "flowtrace/unstructured/diagnostics.py. Row-scaled residuals are componentwise backward errors of the "
+            "discrete systems, not solution errors.</p><table>"
+            + "".join(f"<tr><th>{esc(k)}</th><td>{esc(v)}</td></tr>" for k, v in rows) + "</table>")
+
+
 def run_report_html(app: AppState, job, image=None) -> str:
     """Self-contained HTML report of the current run (opens without FlowTrace)."""
     import html as H
@@ -550,8 +633,11 @@ def run_report_html(app: AppState, job, image=None) -> str:
         mb = res["mass_balance"]
         extra = {}
         if "continuity_local_max" in res:
-            extra["local continuity: max cell imbalance / mean face flux"] = res["continuity_local_max"]
+            extra["local continuity: max cell imbalance / (sum of |face mass fluxes| per cell)"] = res["continuity_local_max"]
         parts.append("<h2>Mass balance</h2>" + table({**mb, "net": sum(mb.values()), **extra}))
+    diag = res.get("diagnostics") or {}
+    if diag.get("available"):
+        parts.append("<h2>Solver diagnostics (last iteration)</h2>" + _diagnostics_table(diag, esc))
     if res.get("wall_report"):
         parts.append("<h2>Wall report</h2><table><tr><th>Zone</th><th>Force (total)</th><th>Cd</th><th>Cl</th>"
                      "<th>y+ max</th><th>Cf avg</th></tr>"
